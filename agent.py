@@ -14,8 +14,9 @@ import torch
 from langchain_openai import ChatOpenAI
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
-from langchain.tools import tool
-from langchain.agents import AgentExecutor, create_react_agent
+from langchain_core.tools import tool
+from langchain.agents import create_react_agent
+from langchain.agents.agent import AgentExecutor
 from langchain_core.prompts import PromptTemplate
 
 sys.path.insert(0, "/gz-data")
@@ -25,7 +26,7 @@ sys.path.insert(0, "/gz-data")
 # ══════════════════════════════════════════════════════════════════════════════
 BASE_URL  = "https://api.gptoai.top/v1"
 API_KEY   = "sk-cjgfHqA58fZNqN8wKb7cffBAY7GyhTaJqzg3zkn4vm0orDV8"
-LLM_MODEL = "gemini-2.0-flash"
+LLM_MODEL = "gemini-2.5-pro-preview-05-06"
 EMB_MODEL = "shibing624/text2vec-base-chinese"
 FAISS_DIR = "/gz-data/faiss_index"
 
@@ -137,6 +138,10 @@ def rms_calculator(lens_idx: int) -> str:
     输出: EFFL / TOTR / 近轴RMS spot size / 像面残差 / Zemax merit function 对比。
     用途: 对 lens_search 返回的候选镜头做精确验证，确认其光学性能是否符合要求。
     """
+    try:
+        lens_idx = int(lens_idx)   # LLM 有时传字符串，强制转 int
+    except (ValueError, TypeError):
+        return f"lens_idx 必须是整数，收到: {lens_idx!r}"
     if not ALL_LENSES:
         return "镜头数据未加载（lenses.pkl 缺失）"
     if lens_idx < 0 or lens_idx >= len(ALL_LENSES):
@@ -211,6 +216,10 @@ def get_lens_surfaces(lens_idx: int) -> str:
     输入: lens_idx 整数。
     输出: 每个光学面的详细参数表，可用于深入分析镜头结构。
     """
+    try:
+        lens_idx = int(lens_idx)
+    except (ValueError, TypeError):
+        return f"lens_idx 必须是整数，收到: {lens_idx!r}"
     if not ALL_LENSES:
         return "镜头数据未加载"
     if lens_idx < 0 or lens_idx >= len(ALL_LENSES):
