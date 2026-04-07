@@ -9,7 +9,7 @@ Question 类型（共 5 类，各 40 条）：
   D. range         —— 范围需求：给区间而非精确值
   E. partial       —— 缺省需求：只给部分参数（1~2个），其余不限
 
-评价指标（三层，对应 PPT i / ii / iii）：
+评价指标：
   i.   hit_rate       —— 与用户输入相符（FOV/Fno 在容差内 = hit）
   ii.  norm_error_sum —— 各指标相对误差归一化加权和
          = W_FOV*|Δfov/fov| + W_FNUM*|Δfnum/fnum| + W_APER*|Δaper/aper|
