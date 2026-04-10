@@ -1,367 +1,237 @@
-"""
-build_testset.py  —  构建 200 条评估 test set
-输出: /gz-data/testset.json
-
-Question 类型（共 5 类，各 40 条）：
-  A. in_domain     —— 数据库有精确匹配（FOV/Fno/aper 完全命中）
-  B. out_of_domain —— 参数组合数据库没有，考验泛化检索
-  C. specific      —— 具体需求：同时指定 FOV/Fno/aper/RMS 目标
-  D. range         —— 范围需求：给区间而非精确值
-  E. partial       —— 缺省需求：只给部分参数（1~2个），其余不限
-
-评价指标：
-  i.   hit_rate       —— 与用户输入相符（FOV/Fno 在容差内 = hit）
-  ii.  norm_error_sum —— 各指标相对误差归一化加权和
-         = W_FOV*|Δfov/fov| + W_FNUM*|Δfnum/fnum| + W_APER*|Δaper/aper|
-  iii. final_score    —— 误差总和 + 归一化RMS（越小越好）
-         = norm_error_sum + rms / RMS_SCALE
-"""
-
-import json, random, pickle
+import pickle, random, json
 from pathlib import Path
-from collections import Counter
+from collections import defaultdict, Counter
 
-FAISS_DIR = "/gz-data/faiss_index"
-OUTPUT    = "/gz-data/testset.json"
 random.seed(42)
 
-W_FOV, W_FNUM, W_APER = 0.4, 0.4, 0.2
-RMS_SCALE = 0.1   # mm，量纲对齐
+with open("/gz-data/faiss_index/lenses.pkl", "rb") as f:
+    ALL_LENSES = pickle.load(f)
+print(f"总镜头数: {len(ALL_LENSES)}")
 
-def load_lenses():
-    pkl = Path(FAISS_DIR) / "lenses.pkl"
-    if not pkl.exists():
-        raise FileNotFoundError(f"找不到 {pkl}，请先运行 build_rag.py")
-    with open(pkl, "rb") as f:
-        lenses = pickle.load(f)
-    for i, l in enumerate(lenses):
-        l["lens_idx"] = i
-    return lenses
+# ── 实际参数值 ────────────────────────────────────────────────────────────
+APER_VALS = [2.0, 4.0, 6.0, 8.0, 10.0, 12.0]   # 数据库仅有这6种
 
-def _gt(lens):
-    return {
-        "lens_idx":  lens.get("lens_idx"),
-        "source":    Path(lens.get("source", "")).name,
-        "fov":       lens.get("fov"),
-        "fnum":      lens.get("fnum"),
-        "aper":      lens.get("aper"),
-        "calc_effl": lens.get("calc_effl"),
-        "calc_totr": lens.get("calc_totr"),
-        "calc_rms":  lens.get("calc_rms"),
-        "calc_yimg": lens.get("calc_yimg"),
-        "fit":       lens.get("fit"),
+fov_vals  = sorted(set(l["fov"]  for l in ALL_LENSES if l.get("fov")  is not None))
+fnum_vals = sorted(set(round(l["fnum"], 1) for l in ALL_LENSES if l.get("fnum") is not None))
+
+print(f"FOV  范围: {min(fov_vals)}° ~ {max(fov_vals)}°, 共{len(fov_vals)}种")
+print(f"Fnum 范围: F/{min(fnum_vals)} ~ F/{max(fnum_vals)}, 共{len(fnum_vals)}种")
+print(f"Aper 可选: {APER_VALS}")
+
+combo_index = defaultdict(list)
+for i, l in enumerate(ALL_LENSES):
+    key = (l.get("fov"), round(l["fnum"], 1) if l.get("fnum") else None)
+    combo_index[key].append(i)
+in_domain_combos = [(k, v) for k, v in combo_index.items() if None not in k]
+
+# ── 设计口吻模板 ──────────────────────────────────────────────────────────
+def design_query(fov, fnum, aper, rms_req=None):
+    fnum = round(fnum, 1)
+    templates = [
+        f"帮我设计一个FOV={fov}度、F/{fnum}、口径{aper}mm的镜头",
+        f"我需要设计一款视场角{fov}度、光圈F/{fnum}、入瞳口径{aper}mm的镜头",
+        f"设计一个FOV={fov}度、F数为{fnum}、通光口径{aper}mm的光学系统",
+        f"请帮我设计FOV={fov}度 F/{fnum} 口径{aper}mm的镜头方案",
+        f"我要设计一款{fov}度视场、F/{fnum}、口径{aper}mm的镜头",
+    ]
+    q = random.choice(templates)
+    if rms_req:
+        q += f"，要求RMS小于{rms_req}mm"
+    return q
+
+def design_query_range(fov_lo, fov_hi, fnum, aper):
+    fnum = round(fnum, 1)
+    templates = [
+        f"帮我设计一个视场角在{fov_lo}到{fov_hi}度之间、F/{fnum}、口径{aper}mm的镜头",
+        f"设计FOV={fov_lo}~{fov_hi}度、F/{fnum}的镜头，入瞳口径{aper}mm",
+        f"我需要一款{fov_lo}-{fov_hi}度视场角、光圈F/{fnum}的镜头方案，口径{aper}mm",
+    ]
+    return random.choice(templates)
+
+def design_query_single(param, val):
+    val = round(val, 1) if isinstance(val, float) else val
+    templates = {
+        "fov":  [
+            f"帮我设计一个视场角{val}度的镜头",
+            f"我需要设计一款FOV={val}度的光学系统",
+            f"设计一个{val}度视场的镜头，成像质量尽量好",
+        ],
+        "fnum": [
+            f"帮我设计一个F/{val}的镜头",
+            f"我需要一款F数为{val}的镜头方案",
+            f"设计一个光圈F/{val}的光学系统，RMS越小越好",
+        ],
+        "aper": [
+            f"帮我设计一个入瞳口径{val}mm的镜头",
+            f"设计一款通光口径{val}mm的光学系统",
+            f"我需要口径{val}mm的镜头方案",
+        ],
+        "semantic": [
+            "帮我设计一款大视场镜头",
+            "我需要设计一个小F数大光圈镜头",
+            "帮我设计一款长焦镜头，视场角尽量小",
+            "设计一个高分辨率小视场镜头",
+        ],
     }
+    return random.choice(templates.get(param, templates["semantic"]))
 
-def _valid(lens):
-    return all(lens.get(k) is not None
-               for k in ("fov", "fnum", "aper", "calc_rms"))
-
-def get_param_sets(lenses):
-    fovs  = sorted(set(l["fov"]  for l in lenses if l.get("fov")  is not None))
-    fnums = sorted(set(l["fnum"] for l in lenses if l.get("fnum") is not None))
-    apers = sorted(set(l["aper"] for l in lenses if l.get("aper") is not None))
-    existing = {(l["fov"], l["fnum"]) for l in lenses
-                if l.get("fov") and l.get("fnum")}
-    return fovs, fnums, apers, existing
-
-# ── A. in_domain ──────────────────────────────────────────────────────────────
-def gen_A(lenses, n=40):
-    pool = [l for l in lenses if _valid(l)]
-    samples = random.sample(pool, min(n, len(pool)))
+# ── 1. in-domain（60条）────────────────────────────────────────────────────
+def make_in_domain(n=60):
+    samples = random.sample(in_domain_combos, min(n, len(in_domain_combos)))
     items = []
-    for lens in samples:
-        fov, fnum, aper = lens["fov"], lens["fnum"], lens["aper"]
-        templates = [
-            f"我需要一个 FOV={fov}度、F/{fnum}、入瞳径{aper}mm 的镜头",
-            f"找 FOV {fov}° 光圈 F/{fnum} 口径 {aper}mm 的镜头方案",
-            f"有没有视场角 {fov} 度、F 数 {fnum}、通光口径 {aper}mm 的设计",
-            f"FOV={fov}度 Fno={fnum} 入瞳径={aper}mm 推荐哪个镜头",
-            f"查找满足 FOV {fov}° F/{fnum} 入瞳 {aper}mm 的镜头",
-        ]
+    for (fov, fnum), lens_ids in samples:
+        aper = random.choice(APER_VALS)
         items.append({
-            "id": f"A_{len(items):03d}", "type": "in_domain",
-            "query": random.choice(templates),
-            "constraints": {"fov": fov, "fnum": fnum, "aper": aper},
-            "ground_truth": _gt(lens),
-            "eval_config": {
-                "has_fov": True, "has_fnum": True, "has_aper": True,
-                "tol_fov": 1.0, "tol_fnum": 0.1, "tol_aper": 1.0,
+            "id":    len(items) + 1,
+            "type":  "in-domain",
+            "query": design_query(fov, fnum, aper),
+            "ground_truth": {
+                "fov":  fov,
+                "fnum": round(fnum, 1),
+                "aper": aper,
+                "candidate_lens_ids": lens_ids[:10],
             },
+            "note": "精确参数，数据库中存在"
         })
-    return items[:n]
+    return items
 
-# ── B. out_of_domain ──────────────────────────────────────────────────────────
-def gen_B(lenses, n=40):
-    fovs, fnums, apers, existing = get_param_sets(lenses)
-    ood_fovs  = [f for f in [5,8,12,15,18,22,45,55,65,75,85,100,120] if f not in fovs]
-    ood_fnums = [f for f in [1.2,1.4,1.6,1.8,3.0,3.5,4.5,5.0,6.3,8.0,11.0] if f not in fnums]
-    ood_fovs  = ood_fovs  + list(fovs[:5])
-    ood_fnums = ood_fnums + list(fnums[-3:])
-
-    items, attempts = [], 0
-    while len(items) < n and attempts < 10000:
-        attempts += 1
-        fov  = random.choice(ood_fovs)
-        fnum = random.choice(ood_fnums)
-        aper = random.choice([4,6,8,10,12,15,18,20,25,30])
-        if (fov, fnum) in existing:
-            continue
-        templates = [
-            f"需要 FOV={fov}度、F/{fnum} 的镜头，找最接近的方案",
-            f"找视场角 {fov}° 光圈 F{fnum} 入瞳径 {aper}mm 的镜头",
-            f"有没有 FOV {fov} 度 Fno={fnum} 的设计可以参考",
-            f"FOV={fov}度 F/{fnum} 口径 {aper}mm 最接近的镜头是什么",
-        ]
-        items.append({
-            "id": f"B_{len(items):03d}", "type": "out_of_domain",
-            "query": random.choice(templates),
-            "constraints": {"fov": fov, "fnum": fnum, "aper": aper},
-            "ground_truth": None,
-            "eval_config": {
-                "has_fov": True, "has_fnum": True, "has_aper": True,
-                "tol_fov": 5.0, "tol_fnum": 0.5, "tol_aper": 3.0,
-            },
-        })
-    return items[:n]
-
-# ── C. specific ───────────────────────────────────────────────────────────────
-def gen_C(lenses, n=40):
-    pool = [l for l in lenses if _valid(l)]
-    samples = random.sample(pool, min(n * 3, len(pool)))
+# ── 2. out-of-domain（40条）──────────────────────────────────────────────
+def make_out_of_domain(n=40):
+    existing = set(combo_index.keys())
+    ood = []
+    for fov in [3, 7, 8, 12, 17, 22, 27, 37, 42, 47, 60, 70, 80, 90]:
+        for fnum in [1.2, 1.5, 3.5, 7.0, 8.0, 11.0, 14.0, 16.0]:
+            fnum_r = round(fnum, 1)
+            if (fov, fnum_r) not in existing:
+                ood.append((fov, fnum_r))
+    samples = random.sample(ood, min(n, len(ood)))
     items = []
-    for lens in samples:
-        if len(items) >= n:
-            break
-        fov, fnum, aper = lens["fov"], lens["fnum"], lens["aper"]
-        rms  = lens["calc_rms"]
-        effl = lens.get("calc_effl")
-        emphasis = random.choice(["rms", "effl", "both"])
-        if emphasis == "rms":
-            add = f"要求近轴 RMS 小于 {rms*1.5:.3f}mm"
-        elif emphasis == "effl" and effl:
-            add = f"焦距约 {effl:.1f}mm"
-        else:
-            add = (f"焦距约 {effl:.1f}mm，RMS 小于 {rms*1.5:.3f}mm"
-                   if effl else f"RMS 越小越好")
-        templates = [
-            f"需要 FOV={fov}度 F/{fnum} 入瞳径{aper}mm 的镜头，{add}",
-            f"找 FOV={fov}° Fno={fnum} 口径{aper}mm 的方案，{add}",
-            f"设计要求：视场角{fov}度、光圈F/{fnum}、入瞳{aper}mm，{add}",
-            f"FOV {fov}度 F/{fnum} {aper}mm口径，{add}，推荐最优方案",
-        ]
+    for fov, fnum in samples:
+        aper = random.choice(APER_VALS)
         items.append({
-            "id": f"C_{len(items):03d}", "type": "specific",
-            "query": random.choice(templates),
-            "constraints": {"fov": fov, "fnum": fnum, "aper": aper,
-                            "rms_target": round(rms * 1.5, 4)},
-            "ground_truth": _gt(lens),
-            "eval_config": {
-                "has_fov": True, "has_fnum": True, "has_aper": True,
-                "tol_fov": 1.0, "tol_fnum": 0.15, "tol_aper": 1.0,
-                "rms_target": round(rms * 1.5, 4),
+            "id":    len(items) + 1,
+            "type":  "out-of-domain",
+            "query": design_query(fov, fnum, aper),
+            "ground_truth": {
+                "fov":  fov,
+                "fnum": fnum,
+                "aper": aper,
+                "candidate_lens_ids": [],
+                "nearest_fov":  min(fov_vals,  key=lambda x: abs(x - fov)),
+                "nearest_fnum": min(fnum_vals, key=lambda x: abs(x - fnum)),
             },
+            "note": "参数不在数据库中，期望返回最近邻并说明"
         })
-    return items[:n]
+    return items
 
-# ── D. range ──────────────────────────────────────────────────────────────────
-def gen_D(lenses, n=40):
-    fovs, fnums, _, _ = get_param_sets(lenses)
-    fov_pairs  = [(a,b) for a in fovs for b in fovs if 2 <= b-a <= 15][:200]
-    fnum_pairs = [(a,b) for a in fnums for b in fnums if 0.2 <= b-a <= 1.5][:200]
-
-    items, attempts = [], 0
-    while len(items) < n and attempts < 5000:
-        attempts += 1
-        if not fov_pairs or not fnum_pairs:
-            break
-        fov_lo, fov_hi   = random.choice(fov_pairs)
-        fnum_lo, fnum_hi = random.choice(fnum_pairs)
-        candidates = [l for l in lenses if _valid(l)
-                      and fov_lo <= l["fov"]  <= fov_hi
-                      and fnum_lo <= l["fnum"] <= fnum_hi]
-        if not candidates:
-            continue
-        best = min(candidates, key=lambda l: l["calc_rms"])
-        templates = [
-            f"FOV 在 {fov_lo}~{fov_hi} 度之间，F/{fnum_lo} 到 F/{fnum_hi}，RMS 尽量小",
-            f"视场角 {fov_lo}°~{fov_hi}°，光圈 F{fnum_lo}~F{fnum_hi}，找性能最好的",
-            f"需要 FOV {fov_lo}-{fov_hi}度、Fno {fnum_lo}-{fnum_hi} 的镜头",
-            f"FOV={fov_lo}到{fov_hi}度 F数{fnum_lo}到{fnum_hi} 有哪些方案",
-            f"视场 {fov_lo}~{fov_hi}度 光圈 F/{fnum_lo}~F/{fnum_hi} 推荐 RMS 最小的",
-        ]
+# ── 3. 范围需求（40条）───────────────────────────────────────────────────
+def make_range_query(n=40):
+    items = []
+    for _ in range(n):
+        fov   = random.choice(fov_vals)
+        fnum  = round(random.choice(fnum_vals), 1)
+        aper  = random.choice(APER_VALS)
+        delta = random.choice([5, 10, 15])
+        fov_lo = max(1, fov - delta)
+        fov_hi = fov + delta
+        valid_ids = [i for i, l in enumerate(ALL_LENSES)
+                     if l.get("fov") is not None and fov_lo <= l["fov"] <= fov_hi][:20]
         items.append({
-            "id": f"D_{len(items):03d}", "type": "range",
-            "query": random.choice(templates),
-            "constraints": {"fov_min": fov_lo, "fov_max": fov_hi,
-                            "fnum_min": fnum_lo, "fnum_max": fnum_hi},
-            "ground_truth": _gt(best),
-            "eval_config": {
-                "has_fov": True, "has_fnum": True, "has_aper": False,
-                "tol_fov": (fov_hi-fov_lo)/2,
-                "tol_fnum": (fnum_hi-fnum_lo)/2,
-                "tol_aper": 999,
+            "id":    len(items) + 1,
+            "type":  "范围需求",
+            "query": design_query_range(fov_lo, fov_hi, fnum, aper),
+            "ground_truth": {
                 "fov_range": [fov_lo, fov_hi],
-                "fnum_range": [fnum_lo, fnum_hi],
+                "fnum":      fnum,
+                "aper":      aper,
+                "valid_lens_ids": valid_ids,
             },
+            "note": f"FOV范围 [{fov_lo}, {fov_hi}]"
         })
-    return items[:n]
+    return items
 
-# ── E. partial ────────────────────────────────────────────────────────────────
-def gen_E(lenses, n=40):
-    pool = [l for l in lenses if _valid(l)]
-    items, attempts = [], 0
-    while len(items) < n and attempts < 5000:
-        attempts += 1
-        lens = random.choice(pool)
-        fov, fnum, aper = lens["fov"], lens["fnum"], lens["aper"]
-        mode = random.choice(["fov_only", "fnum_only", "fov_fnum", "fov_aper"])
-
-        if mode == "fov_only":
-            query = random.choice([
-                f"FOV={fov}度的镜头，其他参数不限，找 RMS 最小的",
-                f"视场角 {fov}° 的镜头有哪些推荐",
-                f"全视场 {fov} 度的镜头设计方案",
-            ])
-            constraints = {"fov": fov}
-            cfg = {"has_fov": True, "has_fnum": False, "has_aper": False,
-                   "tol_fov": 1.0, "tol_fnum": 999, "tol_aper": 999}
-        elif mode == "fnum_only":
-            query = random.choice([
-                f"F/{fnum} 的镜头，视场和口径不限，RMS 越小越好",
-                f"光圈 F{fnum} 的镜头方案推荐",
-                f"Fno={fnum} 有哪些可用镜头",
-            ])
-            constraints = {"fnum": fnum}
-            cfg = {"has_fov": False, "has_fnum": True, "has_aper": False,
-                   "tol_fov": 999, "tol_fnum": 0.1, "tol_aper": 999}
-        elif mode == "fov_fnum":
-            query = random.choice([
-                f"FOV={fov}度、F/{fnum} 的镜头，口径不限，RMS 尽量小",
-                f"视场角 {fov}° 光圈 F{fnum} 的方案有哪些",
-                f"找 FOV {fov}度 F/{fnum} 性能最好的镜头",
-            ])
-            constraints = {"fov": fov, "fnum": fnum}
-            cfg = {"has_fov": True, "has_fnum": True, "has_aper": False,
-                   "tol_fov": 1.5, "tol_fnum": 0.2, "tol_aper": 999}
-        else:
-            query = random.choice([
-                f"FOV={fov}度、入瞳径{aper}mm 的镜头，光圈不限，RMS 越小越好",
-                f"视场角 {fov}° 口径 {aper}mm 的镜头方案",
-                f"FOV {fov}度 通光口径 {aper}mm 有哪些推荐",
-            ])
-            constraints = {"fov": fov, "aper": aper}
-            cfg = {"has_fov": True, "has_fnum": False, "has_aper": True,
-                   "tol_fov": 1.5, "tol_fnum": 999, "tol_aper": 1.5}
-
+# ── 4. 具体需求（40条）───────────────────────────────────────────────────
+def make_specific(n=40):
+    items = []
+    for _ in range(n):
+        lens = ALL_LENSES[random.randint(0, len(ALL_LENSES)-1)]
+        fov  = lens.get("fov",  30)
+        fnum = round(lens.get("fnum", 2.8), 1)
+        aper = random.choice(APER_VALS)
+        rms_thr = random.choice([0.05, 0.1, 0.15, 0.3])
+        best = sorted(
+            [l for l in ALL_LENSES
+             if l.get("fov") == fov and round(l.get("fnum",0),1) == fnum
+             and l.get("calc_rms") is not None],
+            key=lambda l: l["calc_rms"]
+        )[:5]
         items.append({
-            "id": f"E_{len(items):03d}", "type": "partial",
-            "query": query,
-            "constraints": constraints,
-            "ground_truth": _gt(lens),
-            "eval_config": cfg,
+            "id":    len(items) + 1,
+            "type":  "具体需求",
+            "query": design_query(fov, fnum, aper, rms_req=rms_thr),
+            "ground_truth": {
+                "fov": fov, "fnum": fnum, "aper": aper,
+                "rms_threshold": rms_thr,
+                "best_rms_lenses": [ALL_LENSES.index(l) for l in best],
+            },
+            "note": "多参数 + RMS约束"
         })
-    return items[:n]
+    return items
 
-# ══════════════════════════════════════════════════════════════════════════════
-# 评分函数（供 eval.py 调用）
-# ══════════════════════════════════════════════════════════════════════════════
-def score_response(item: dict, agent_response: dict) -> dict:
-    """
-    三层评分：
-      i.   hit            —— 与用户输入相符程度
-      ii.  norm_error_sum —— 各指标误差归一化加权和
-      iii. final_score    —— norm_error_sum + rms/RMS_SCALE
-    """
-    cfg  = item.get("eval_config", {})
-    cons = item.get("constraints", {})
+# ── 5. 缺省需求（20条）───────────────────────────────────────────────────
+def make_default(n=20):
+    items = []
+    param_choices = (
+        [("fov",  v) for v in random.sample(fov_vals, 6)] +
+        [("fnum", v) for v in random.sample(fnum_vals, 6)] +
+        [("aper", v) for v in APER_VALS] +
+        [("semantic", None)] * 2
+    )
+    random.shuffle(param_choices)
+    for param, val in param_choices[:n]:
+        q = design_query_single(param, val) if val else design_query_single("semantic", None)
+        items.append({
+            "id":   len(items) + 1,
+            "type": "缺省需求",
+            "query": q,
+            "ground_truth": {
+                "known_param": param,
+                "known_value": round(val, 1) if isinstance(val, float) else val,
+            },
+            "note": "单参数或语义查询"
+        })
+    return items
 
-    t_fov  = cons.get("fov")  or cons.get("fov_min")
-    t_fnum = cons.get("fnum") or cons.get("fnum_min")
-    t_aper = cons.get("aper")
+# ── 合并 + 打乱 + 重新编号 ────────────────────────────────────────────────
+all_items = (
+    make_in_domain(60) +
+    make_out_of_domain(40) +
+    make_range_query(40) +
+    make_specific(40) +
+    make_default(20)
+)
+random.shuffle(all_items)
+for i, item in enumerate(all_items):
+    item["id"] = i + 1
 
-    has_fov  = cfg.get("has_fov",  bool(t_fov))
-    has_fnum = cfg.get("has_fnum", bool(t_fnum))
-    has_aper = cfg.get("has_aper", bool(t_aper))
-    tol_fov  = cfg.get("tol_fov",  2.0)
-    tol_fnum = cfg.get("tol_fnum", 0.3)
-    tol_aper = cfg.get("tol_aper", 2.0)
+out = Path("/gz-data/testset_200.json")
+with open(out, "w", encoding="utf-8") as f:
+    json.dump(all_items, f, ensure_ascii=False, indent=2)
 
-    retrieved = agent_response.get("retrieved_lenses", [])
-    if not retrieved:
-        return {"hit": False, "fov_rel_err": 1.0, "fnum_rel_err": 1.0,
-                "aper_rel_err": 1.0, "norm_error_sum": 1.0,
-                "final_score": 1.0 + 999/RMS_SCALE, "rms": 999.0}
+from collections import Counter
+type_cnt = Counter(item["type"] for item in all_items)
+print(f"\n✅ 测试集已保存: {out}")
+print(f"总数: {len(all_items)} 条")
+for t, c in type_cnt.items():
+    print(f"  {t}: {c} 条")
 
-    best = min(retrieved, key=lambda x: x.get("calc_rms") or 999)
+# 打印样例
+print("\n=== 各类型样例 ===")
+shown = set()
+for item in all_items:
+    if item["type"] not in shown:
+        print(f"[{item['type']}] {item['query']}")
+        shown.add(item["type"])
+    if len(shown) == 5:
+        break
 
-    def rel_err(pred, target):
-        if not target:
-            return 0.0
-        return abs((pred or 0) - target) / abs(target)
-
-    fov_err  = rel_err(best.get("fov"),  t_fov)  if has_fov  else 0.0
-    fnum_err = rel_err(best.get("fnum"), t_fnum) if has_fnum else 0.0
-    aper_err = rel_err(best.get("aper"), t_aper) if has_aper else 0.0
-    rms      = best.get("calc_rms") or 999.0
-
-    norm_sum = W_FOV * fov_err + W_FNUM * fnum_err + W_APER * aper_err
-    final    = norm_sum + rms / RMS_SCALE
-
-    hit = True
-    if has_fov  and t_fov  is not None:
-        hit &= abs((best.get("fov")  or 999) - t_fov)  <= tol_fov
-    if has_fnum and t_fnum is not None:
-        hit &= abs((best.get("fnum") or 999) - t_fnum) <= tol_fnum
-    if has_aper and t_aper is not None:
-        hit &= abs((best.get("aper") or 999) - t_aper) <= tol_aper
-
-    return {
-        "hit":            hit,
-        "fov_rel_err":    round(fov_err,  4),
-        "fnum_rel_err":   round(fnum_err, 4),
-        "aper_rel_err":   round(aper_err, 4),
-        "norm_error_sum": round(norm_sum, 4),
-        "final_score":    round(final,    4),
-        "rms":            round(rms,      6),
-    }
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 主程序
-# ══════════════════════════════════════════════════════════════════════════════
-if __name__ == "__main__":
-    print("加载镜头库…")
-    lenses = load_lenses()
-    valid  = [l for l in lenses if _valid(l)]
-    print(f"共 {len(lenses)} 条，追迹成功 {len(valid)} 条")
-
-    fovs, fnums, apers, _ = get_param_sets(valid)
-    print(f"FOV:  {min(fovs):.1f}~{max(fovs):.1f}度  ({len(fovs)} 种)")
-    print(f"Fno:  {min(fnums):.2f}~{max(fnums):.2f}  ({len(fnums)} 种)")
-    print(f"Aper: {min(apers):.1f}~{max(apers):.1f}mm ({len(apers)} 种)")
-
-    print("\n生成 test set…")
-    testset  = []
-    testset += gen_A(lenses, n=40)
-    testset += gen_B(lenses, n=40)
-    testset += gen_C(lenses, n=40)
-    testset += gen_D(lenses, n=40)
-    testset += gen_E(lenses, n=40)
-
-    random.shuffle(testset)
-    for i, item in enumerate(testset):
-        item["global_id"] = i
-
-    with open(OUTPUT, "w", encoding="utf-8") as f:
-        json.dump(testset, f, ensure_ascii=False, indent=2)
-
-    cnt = Counter(item["type"] for item in testset)
-    print(f"\n✅ {OUTPUT}  共 {len(testset)} 条")
-    for t, n in sorted(cnt.items()):
-        print(f"   {t:12s}: {n:3d} 条")
-
-    print("\n── 样例 ──")
-    for t in ["in_domain","out_of_domain","specific","range","partial"]:
-        ex = next((x for x in testset if x["type"] == t), None)
-        if ex:
-            print(f"\n[{t}] {ex['query']}")
-            print(f"  constraints: {ex['constraints']}")
