@@ -1,208 +1,256 @@
+cat > /gz-data/eval.py << 'PYEOF'
+#!/usr/bin/env python3
 """
-eval.py     —  跑 Agent baseline 并打分
-用法:
-    python eval.py                        # 跑全部 200 条
-    python eval.py --n 20                 # 只跑前 20 条（快速验证）
-    python eval.py --type in_domain       # 只跑某类
-输出:
-    /gz-data/eval_results.jsonl   每条 query 的详细结果
-    /gz-data/eval_summary.json    汇总指标
+eval.py
+    python eval.py                              # 全量
+    python eval.py --n 5                        # 前 5 条
+    python eval.py --resume                     # 断点续跑
+    python eval.py --plot-only                  # 只重画图
+    python eval.py --shard 0 --total-shards 4  # 并发分片
 """
-
-import json, sys, argparse, time
+import argparse, json, re, time
 from pathlib import Path
+import numpy as np
 
-# ── 复用 agent.py 的所有组件 ─────────────────────────────────────────────────
-sys.path.insert(0, "/gz-data")
-from agent import load_rag, build_agent, ALL_LENSES, VS
-import agent as _agent_mod
+DATA_DIR   = Path("/gz-data")
+TESTSET    = DATA_DIR / "testset.json"
+RESULT_F   = DATA_DIR / "eval_results.jsonl"
+SUMMARY_F  = DATA_DIR / "eval_summary.json"
+REPORT_DIR = DATA_DIR / "eval_report"
+REPORT_DIR.mkdir(exist_ok=True)
 
-from build_testset import score_response
+FOV_RANGE  = (4.0,  59.0)
+FNUM_RANGE = (1.6,  6.0)
+APER_RANGE = (2.0,  12.0)
+RMS_MAX    = 0.5
+TOL_FOV, TOL_FNUM, TOL_APER = 5.0, 0.5, 3.0
 
-TESTSET_PATH = "/gz-data/testset.json"
-RESULTS_PATH = "/gz-data/eval_results.jsonl"
-SUMMARY_PATH = "/gz-data/eval_summary.json"
+from agent import run_agent
 
-# ── 解析 Agent 输出，提取候选镜头列表 ─────────────────────────────────────────
-def parse_agent_output(output: str, agent_output: dict) -> dict:
-    """
-    从 AgentExecutor 的完整输出里提取候选镜头信息。
-    intermediate_steps 里有每次工具调用的输入输出。
-    """
-    retrieved = []
+def parse_prediction(text: str) -> dict:
+    fa = re.search(r"Final Answer[::](.*)", text, re.DOTALL | re.IGNORECASE)
+    t = fa.group(1) if fa else text
+    pred = {}
+    fov_all = re.findall(r"FOV[=:][^0-9]*([0-9]+\.?[0-9]*)", t, re.IGNORECASE)
+    if fov_all:
+        pred["fov"] = float(fov_all[-1])
+    fn_all = re.findall(r"F/([0-9]+\.?[0-9]*)", t, re.IGNORECASE)
+    if fn_all:
+        pred["fnum"] = float(fn_all[-1])
+    rm = re.search(r"RMS[^0-9]*([0-9]+\.[0-9]+(?:[eE][+-]?[0-9]+)?)\s*mm", t, re.IGNORECASE)
+    if rm:
+        pred["rms"] = float(rm.group(1))
+    return pred
 
-    # 从 intermediate_steps 里找 lens_search / rank_by_rms 的返回结果
-    for action, observation in agent_output.get("intermediate_steps", []):
-        tool_name = getattr(action, "tool", "")
-        if tool_name in ("lens_search", "rank_by_rms"):
-            # 解析观察结果里的镜头信息
-            for line in str(observation).split("\n"):
-                if "镜头#" not in line:
-                    continue
-                try:
-                    # 格式: [N] 镜头#IDX | FOV=X° | F/Y | ...
-                    idx  = int(line.split("镜头#")[1].split()[0].rstrip("|"))
-                    fov  = float(line.split("FOV=")[1].split("°")[0]) if "FOV=" in line else None
-                    fnum = float(line.split("F/")[1].split()[0].rstrip("|")) if "F/" in line else None
-                    rms_s = line.split("近轴RMS=")[1].split("mm")[0] if "近轴RMS=" in line else None
-                    rms  = float(rms_s) if rms_s else None
+def norm_err(val, pred, lo, hi):
+    if val is None or pred is None:
+        return None
+    return abs(val - pred) / (hi - lo)
 
-                    if idx < len(_agent_mod.ALL_LENSES):
-                        l = _agent_mod.ALL_LENSES[idx]
-                        retrieved.append({
-                            "lens_idx": idx,
-                            "fov":      l.get("fov"),
-                            "fnum":     l.get("fnum"),
-                            "aper":     l.get("aper"),
-                            "calc_rms": l.get("calc_rms"),
-                            "calc_effl":l.get("calc_effl"),
-                        })
-                except Exception:
-                    continue
+def score_item(item: dict, pred: dict) -> dict:
+    c = item["constraints"]
+    s = {}
+    if "fov" in c and "fov" in pred:
+        s["fov_err"] = norm_err(c["fov"], pred["fov"], *FOV_RANGE)
+    elif "fov_min" in c and "fov" in pred:
+        s["fov_err"] = norm_err((c["fov_min"]+c["fov_max"])/2, pred["fov"], *FOV_RANGE)
+    if "fnum" in c and "fnum" in pred:
+        s["fnum_err"] = norm_err(c["fnum"], pred["fnum"], *FNUM_RANGE)
+    elif "fnum_min" in c and "fnum" in pred:
+        s["fnum_err"] = norm_err((c["fnum_min"]+c["fnum_max"])/2, pred["fnum"], *FNUM_RANGE)
+    if c.get("aper", 0) > 0 and "aper" in pred:
+        s["aper_err"] = norm_err(c["aper"], pred["aper"], *APER_RANGE)
+    if "rms" in pred:
+        s["rms_pred"] = pred["rms"]
+        s["rms_norm"] = min(pred["rms"] / RMS_MAX, 1.0)
+    errs = [v for k, v in s.items() if k.endswith("_err") and v is not None]
+    s["norm_sum"] = sum(errs) / len(errs) if errs else None
+    if not pred:
+        return {**s, "hit": 0}
+    hit = True
+    if "fov"  in c and "fov"  in pred: hit &= abs(c["fov"]  - pred["fov"])  <= TOL_FOV
+    if "fnum" in c and "fnum" in pred: hit &= abs(c["fnum"] - pred["fnum"]) <= TOL_FNUM
+    if c.get("aper", 0) > 0 and "aper" in pred:
+        hit &= abs(c["aper"] - pred["aper"]) <= TOL_APER
+    if "rms_target" in c and "rms" in pred:
+        hit &= pred["rms"] <= c["rms_target"]
+    if "fov_min" in c and "fov" in pred:
+        hit &= c["fov_min"] <= pred["fov"] <= c["fov_max"]
+    if "fnum_min" in c and "fnum" in pred:
+        hit &= c["fnum_min"] <= pred["fnum"] <= c["fnum_max"]
+    s["hit"] = int(hit)
+    return s
 
-    # 去重（同一 lens_idx 只保留一次）
-    seen = set()
-    unique = []
-    for r in retrieved:
-        if r["lens_idx"] not in seen:
-            seen.add(r["lens_idx"])
-            unique.append(r)
+def plot_results(results: list):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    TYPES  = ["in_domain", "out_of_domain", "partial", "range", "specific"]
+    COLORS = ["#4C72B0", "#DD8452", "#55A868", "#C44E52", "#8172B2"]
+    def avg(key):
+        out = {}
+        for t in TYPES:
+            vals = [r["scores"][key] for r in results
+                    if r["type"] == t and r["scores"].get(key) is not None]
+            out[t] = float(np.mean(vals)) if vals else 0.0
+        return out
+    metrics = [
+        ("fov_err",  "FOV Norm Error"),
+        ("fnum_err", "Fnum Norm Error"),
+        ("norm_sum", "Overall Norm Error"),
+        ("hit",      "Hit Rate"),
+    ]
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    fig.suptitle("LensAgent Baseline Evaluation", fontsize=14, fontweight="bold")
+    for ax, (key, title) in zip(axes.flat, metrics):
+        d = avg(key)
+        bars = ax.bar(d.keys(), d.values(), color=COLORS, width=0.5)
+        ax.set_title(title)
+        ax.set_ylim(0, 1.15)
+        ax.tick_params(axis="x", rotation=20)
+        for b, v in zip(bars, d.values()):
+            ax.text(b.get_x() + b.get_width()/2, b.get_height() + 0.02,
+                    f"{v:.3f}", ha="center", fontsize=9)
+    plt.tight_layout()
+    out = REPORT_DIR / "baseline_metrics.png"
+    plt.savefig(out, dpi=150, bbox_inches="tight")
+    print(f"📊 图表已保存: {out}")
 
-    return {
-        "retrieved_lenses": unique,
-        "answer": agent_output.get("output", ""),
-    }
-
-# ── 主评估循环 ────────────────────────────────────────────────────────────────
-def run_eval(items: list, executor) -> list:
-    results = []
-    for i, item in enumerate(items):
-        print(f"\n[{i+1}/{len(items)}] {item['id']} | {item['type']}")
-        print(f"  Q: {item['query']}")
-
-        t0 = time.time()
-        try:
-            raw = executor.invoke(
-                {"input": item["query"]},
-                return_only_outputs=False,
-            )
-            elapsed = time.time() - t0
-            agent_resp = parse_agent_output(item["query"], raw)
-            scores     = score_response(item, agent_resp)
-            status     = "ok"
-        except Exception as e:
-            elapsed    = time.time() - t0
-            agent_resp = {"retrieved_lenses": [], "answer": f"ERROR: {e}"}
-            scores     = {"fov_error": 999, "fnum_error": 999, "rms": 999,
-                          "norm_sum": 999, "hit": False}
-            status     = "error"
-            print(f"  ❌ {e}")
-
-        result = {
-            **item,
-            "agent_answer":     agent_resp["answer"],
-            "retrieved_lenses": agent_resp["retrieved_lenses"],
-            "scores":           scores,
-            "elapsed_s":        round(elapsed, 2),
-            "status":           status,
+def summarize(results):
+    TYPES = ["in_domain", "out_of_domain", "partial", "range", "specific"]
+    summary = {"total": len(results), "by_type": {}}
+    for t in TYPES:
+        sub = [r for r in results if r["type"] == t]
+        if not sub:
+            continue
+        hits  = [r["scores"].get("hit", 0) for r in sub]
+        norms = [r["scores"]["norm_sum"] for r in sub if r["scores"].get("norm_sum") is not None]
+        rmss  = [r["scores"]["rms_pred"] for r in sub if r["scores"].get("rms_pred") is not None]
+        summary["by_type"][t] = {
+            "n":            len(sub),
+            "hit_rate":     round(float(np.mean(hits)), 3),
+            "avg_norm_sum": round(float(np.mean(norms)), 4) if norms else None,
+            "avg_rms":      round(float(np.mean(rmss)),  4) if rmss  else None,
         }
-        results.append(result)
+    overall = float(np.mean([r["scores"].get("hit", 0) for r in results]))
+    summary["overall_hit_rate"] = round(overall, 3)
+    return summary, overall
 
-        print(f"  hit={scores['hit']} | RMS={scores['rms']:.4f} | "
-              f"norm_sum={scores['norm_sum']:.4f} | {elapsed:.1f}s")
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--n",            type=int,  default=None)
+    p.add_argument("--resume",       action="store_true")
+    p.add_argument("--plot-only",    action="store_true")
+    p.add_argument("--shard",        type=int,  default=None, help="分片索引 0-based")
+    p.add_argument("--total-shards", type=int,  default=4,    help="总分片数")
+    p.add_argument("--merge",        action="store_true",     help="合并所有分片结果")
+    args = p.parse_args()
 
-        # 实时写入，防止中途崩溃丢数据
-        with open(RESULTS_PATH, "a", encoding="utf-8") as f:
-            f.write(json.dumps(result, ensure_ascii=False) + "\n")
+    # ── merge 模式：合并分片结果并生成汇总 ──────────────────────────────
+    if args.merge:
+        results = []
+        for i in range(args.total_shards):
+            f = DATA_DIR / f"eval_results_shard{i}.jsonl"
+            if f.exists():
+                for line in f.read_text().splitlines():
+                    if line.strip():
+                        results.append(json.loads(line))
+        print(f"合并 {len(results)} 条结果")
+        RESULT_F.write_text(
+            "\n".join(json.dumps(r, ensure_ascii=False) for r in results),
+            encoding="utf-8"
+        )
+        summary, overall = summarize(results)
+        SUMMARY_F.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"总命中率: {overall:.1%}  ({len(results)} 条)")
+        for t, s in summary["by_type"].items():
+            print(f"  {t:15s}: hit={s['hit_rate']:.1%}  norm_sum={s['avg_norm_sum']}  rms={s['avg_rms']}")
+        plot_results(results)
+        return
 
-    return results
+    # ── plot-only 模式 ───────────────────────────────────────────────────
+    if args.plot_only:
+        results = [json.loads(l) for l in RESULT_F.read_text().splitlines() if l.strip()]
+        plot_results(results)
+        return
 
-# ── 汇总统计 ──────────────────────────────────────────────────────────────────
-def summarize(results: list) -> dict:
-    from collections import defaultdict
-    import statistics
-
-    by_type = defaultdict(list)
-    for r in results:
-        by_type[r["type"]].append(r)
-
-    def _stats(items):
-        scores = [r["scores"] for r in items if r["status"] == "ok"]
-        if not scores:
-            return {}
-        hits     = [s["hit"]      for s in scores]
-        norms    = [s["norm_sum"] for s in scores if s["norm_sum"] < 999]
-        rms_list = [s["rms"]      for s in scores if s["rms"]      < 999]
-        return {
-            "n":              len(items),
-            "hit_rate":       round(sum(hits) / len(hits), 4) if hits else 0,
-            "avg_norm_sum":   round(statistics.mean(norms),    4) if norms    else 999,
-            "avg_rms":        round(statistics.mean(rms_list), 6) if rms_list else 999,
-            "median_rms":     round(statistics.median(rms_list), 6) if rms_list else 999,
-            "avg_elapsed_s":  round(statistics.mean([r["elapsed_s"] for r in items]), 2),
-            "error_count":    sum(1 for r in items if r["status"] == "error"),
-        }
-
-    summary = {
-        "total":   len(results),
-        "overall": _stats(results),
-        "by_type": {t: _stats(items) for t, items in by_type.items()},
-    }
-
-    with open(SUMMARY_PATH, "w", encoding="utf-8") as f:
-        json.dump(summary, f, ensure_ascii=False, indent=2)
-
-    return summary
-
-# ── 入口 ──────────────────────────────────────────────────────────────────────
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--n",    type=int,  default=None, help="只跑前 N 条")
-    parser.add_argument("--type", type=str,  default=None,
-                        help="只跑某类: in_domain / out_of_domain / range / partial")
-    parser.add_argument("--resume", action="store_true",
-                        help="跳过已有结果（从 eval_results.jsonl 读已完成 id）")
-    args = parser.parse_args()
-
-    # 加载 RAG + Agent
-    _agent_mod.VS, _agent_mod.ALL_LENSES = load_rag()
-    executor = build_agent()
-
-    # 加载 testset
-    with open(TESTSET_PATH, encoding="utf-8") as f:
-        testset = json.load(f)
-
-    # 过滤
-    if args.type:
-        testset = [x for x in testset if x["type"] == args.type]
-    if args.resume and Path(RESULTS_PATH).exists():
-        done_ids = set()
-        with open(RESULTS_PATH, encoding="utf-8") as f:
-            for line in f:
-                try:
-                    done_ids.add(json.loads(line)["id"])
-                except Exception:
-                    pass
-        testset = [x for x in testset if x["id"] not in done_ids]
-        print(f"Resume: 跳过 {len(done_ids)} 条已完成，剩余 {len(testset)} 条")
+    # ── 确定输出文件和数据范围 ───────────────────────────────────────────
+    items = json.loads(TESTSET.read_text(encoding="utf-8"))
     if args.n:
-        testset = testset[:args.n]
+        items = items[:args.n]
 
-    print(f"评估 {len(testset)} 条 query…")
+    if args.shard is not None:
+        # 分片：每个 shard 取自己的那段
+        items = [x for i, x in enumerate(items) if i % args.total_shards == args.shard]
+        out_file = DATA_DIR / f"eval_results_shard{args.shard}.jsonl"
+        print(f"[Shard {args.shard}/{args.total_shards}] {len(items)} 条")
+    else:
+        out_file = RESULT_F
 
-    # 清空或追加
-    if not args.resume:
-        open(RESULTS_PATH, "w").close()
+    # 断点续跑
+    done_ids = set()
+    if (args.resume or args.shard is not None) and out_file.exists():
+        for line in out_file.read_text().splitlines():
+            if line.strip():
+                done_ids.add(json.loads(line)["id"])
+        print(f"已完成 {len(done_ids)} 条，跳过")
 
-    results  = run_eval(testset, executor)
-    summary  = summarize(results)
+    results = []
+    mode = "a" if (args.resume or args.shard is not None) else "w"
+    with open(out_file, mode, encoding="utf-8") as fout:
+        for i, item in enumerate(items):
+            iid = item.get("id", i)
+            if iid in done_ids:
+                continue
 
-    print("\n" + "="*50)
-    print("评估完成")
-    print(f"  总计:     {summary['total']} 条")
-    o = summary["overall"]
-    print(f"  命中率:   {o.get('hit_rate', 0):.2%}")
-    print(f"  平均RMS:  {o.get('avg_rms', 999):.4f} mm")
-    print(f"  avg_norm: {o.get('avg_norm_sum', 999):.4f}")
-    print(f"\n详细结果: {RESULTS_PATH}")
-    print(f"汇总结果: {SUMMARY_PATH}")
+            q = item["query"]
+            print(f"[{i+1}/{len(items)}] [{item['type']:15s}] {q[:55]}")
+            t0 = time.time()
+            try:
+                response = run_agent(q)
+                status   = "ok"
+            except Exception as e:
+                response = f"ERROR: {e}"
+                status   = "error"
+                print(f"  ❌ {e}")
+            elapsed = round(time.time() - t0, 1)
+
+            pred   = parse_prediction(response)
+            scores = score_item(item, pred)
+
+            row = {
+                "id":       iid,
+                "type":     item["type"],
+                "query":    q,
+                "response": response[:800],
+                "pred":     pred,
+                "scores":   scores,
+                "status":   status,
+                "elapsed":  elapsed,
+            }
+            results.append(row)
+            fout.write(json.dumps(row, ensure_ascii=False) + "\n")
+            fout.flush()
+
+            ns = scores.get("norm_sum")
+            ns_str = f"{ns:.3f}" if ns is not None else "-"
+            hit_icon = "✅" if scores.get("hit") else "❌"
+            print(f"  {hit_icon}  pred={pred}  norm_sum={ns_str}  [{elapsed}s]")
+
+    # 非分片模式才自动汇总
+    if args.shard is None:
+        if not results:
+            results = [json.loads(l) for l in out_file.read_text().splitlines() if l.strip()]
+        summary, overall = summarize(results)
+        SUMMARY_F.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"\n总命中率: {overall:.1%}  ({len(results)} 条)")
+        for t, s in summary["by_type"].items():
+            print(f"  {t:15s}: hit={s['hit_rate']:.1%}  norm_sum={s['avg_norm_sum']}  rms={s['avg_rms']}")
+        plot_results(results)
+    else:
+        print(f"[Shard {args.shard}] 完成 {len(results)} 条 → {out_file}")
+
+if __name__ == "__main__":
+    main()
+PYEOF
+echo "✅ eval.py 写入完成"
