@@ -1,0 +1,88 @@
+import urllib.request, json
+
+API_KEY  = "sk-rXuv43xkGdjE6VVS80SbTMmQcc7uKMXz065TXX9R3UidadLL"
+BASE_URL = "https://yxai.anthropic.edu.pl"
+MODEL    = "gemini-2.5-flash-preview-05-20"
+
+PROMPT = """你是光学设计专家。基于 CDGM 玻璃库和近轴追迹模型，生成12条结构化镜头优化skill。
+
+可用玻璃：
+H-FK95N(nd=1.438,Vd=94.5), H-FK71(nd=1.457,Vd=90.3), H-FK61(nd=1.497,Vd=81.6),
+H-QK3L(nd=1.488,Vd=70.4), H-ZPK7(nd=1.569,Vd=71.3), H-ZPK5(nd=1.593,Vd=68.3),
+H-ZK3(nd=1.589,Vd=61.3), H-ZK21(nd=1.640,Vd=60.1), H-BAK4(nd=1.553,Vd=63.4),
+H-LAK7A(nd=1.713,Vd=53.8), H-LAK12(nd=1.697,Vd=56.2), H-LAF10LA(nd=1.755,Vd=52.3),
+H-LAF53(nd=1.743,Vd=49.2), H-ZBAF1(nd=1.622,Vd=53.2), H-ZLAF2A(nd=1.803,Vd=46.8),
+H-ZLAF55D(nd=1.835,Vd=42.7), H-ZF1(nd=1.648,Vd=33.8), H-ZF4A(nd=1.728,Vd=28.3),
+H-ZF7LA(nd=1.805,Vd=25.5), H-ZF52(nd=1.847,Vd=23.8), H-ZF62(nd=1.923,Vd=20.9),
+H-ZF73(nd=1.959,Vd=17.5), D-LAF50(nd=1.755,Vd=52.3)
+
+追迹输出：EFFL(有效焦距mm) / TOTR(系统总长mm) / RMS(近轴光斑半径mm) / y_image(像面残差mm)
+可修改参数：radius / thickness / material / semi_diameter
+禁止使用肖特/OHARA牌号（N-BK7、N-FK51A等）
+
+覆盖场景：轴上球差、轴向色差、场曲、畸变、EFFL偏差、大视场RMS、厚度优化、材料组合策略、优化停滞回溯
+
+每条skill严格按此格式，不要有任何多余说明：
+【SkillN】标题
+症状: （什么指标异常，数值范围）
+原因: （物理根源）
+动作:
+  1. （具体操作，含工具名和参数）
+  2. ...
+  3. ...
+预期改善: （改善幅度估计）
+风险: （副作用）
+"""
+
+payload = json.dumps({
+    "model": MODEL,
+    "max_tokens": 4000,
+    "messages": [{"role": "user", "content": PROMPT}]
+}).encode()
+
+req = urllib.request.Request(
+    f"{BASE_URL}/v1/messages",
+    data=payload,
+    headers={
+        "Content-Type": "application/json",
+        "x-api-key": API_KEY,
+        "anthropic-version": "2023-06-01"
+    },
+    method="POST"
+)
+
+print("调用 Gemini 生成 skill...")
+try:
+    with urllib.request.urlopen(req, timeout=60) as r:
+        result = json.loads(r.read())
+        skill_text = result["content"][0]["text"]
+        print("生成成功！")
+        print("-" * 60)
+        print(skill_text)
+        print("-" * 60)
+
+        # 写入 lens_skills.py
+        output = f'LENS_SKILLS = """\n{skill_text}\n"""\n'
+        with open("/gz-data/lens_skills.py", "w", encoding="utf-8") as f:
+            f.write(output)
+        print("已保存到 /gz-data/lens_skills.py")
+
+except urllib.error.HTTPError as e:
+    body = e.read().decode()
+    print(f"HTTP {e.code}: {body}")
+    # 如果模型名不对，打印可用模型
+    if e.code == 404 or "model" in body.lower():
+        print("\n可能模型名有误，尝试列出可用模型...")
+        req2 = urllib.request.Request(
+            f"{BASE_URL}/v1/models",
+            headers={"x-api-key": API_KEY, "anthropic-version": "2023-06-01"},
+            method="GET"
+        )
+        try:
+            with urllib.request.urlopen(req2, timeout=10) as r2:
+                models = json.loads(r2.read())
+                print(json.dumps(models, indent=2, ensure_ascii=False))
+        except Exception as e2:
+            print(f"列模型失败: {e2}")
+except Exception as e:
+    print(f"ERROR: {e}")
