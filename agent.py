@@ -1,28 +1,4 @@
-"""
-agent_optimizer.py  —  镜头优化 Agent（带 lens_optimizer 工具）
 
-用法:
-    # 第一步：启动 vLLM 服务（另开终端）
-    #   vllm serve /gz-data/models/Qwen3-14B-AWQ \
-    #       --served-model-name qwen3-14b \
-    #       --quantization awq \
-    #       --port 8000 \
-    #       --max-model-len 8192 \
-    #       --gpu-memory-utilization 0.90
-
-    # Gemini baseline（默认，不需要本地服务）
-    python agent_optimizer.py --query "帮我设计FOV=45度 F/3.5 入瞳径15mm的镜头"
-
-    # 切换到本地 Qwen3-14B-AWQ
-    python agent_optimizer.py --model qwen3 --query "..."
-
-    # 交互模式
-    python agent_optimizer.py --model qwen3
-
-关键区别（Gemini vs Qwen3）:
-    gemini: create_react_agent  — 文本 Action/Observation 格式
-    qwen3:  create_openai_tools_agent — 结构化 JSON tool call，关闭 thinking 模式
-"""
 
 import os, sys, ast, pickle, argparse
 from pathlib import Path
