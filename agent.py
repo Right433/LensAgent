@@ -1,15 +1,3 @@
-"""
-agent_v2.py  —  检索 + 修改 + 迭代优化 Agent
-在原 agent.py 基础上新增：
-  - modify_lens(lens_idx, surface_id, param, value)  修改面型参数
-  - optimize_lens(lens_idx)                          重新追迹，返回最新性能
-  - reset_lens(lens_idx)                             恢复到数据库原始值
-
-用法:
-    python agent_v2.py                                # 交互模式
-    python agent_v2.py --query "FOV=35度 F/2.8 RMS<0.05"
-"""
-
 import os, sys, ast, copy, pickle, argparse, json
 from pathlib import Path
 
