@@ -1,0 +1,5972 @@
+[
+  {
+    "id": "A_024",
+    "type": "in_domain",
+    "query": "我要设计一款 37.0 度视场、F/3.7、口径 0.0mm 的镜头",
+    "constraints": {
+      "fov": 37.0,
+      "fnum": 3.7,
+      "aper": 0.0
+    },
+    "ground_truth": {
+      "lens_idx": 118183,
+      "fov": 37.0,
+      "fnum": 3.7,
+      "aper": 0.0,
+      "calc_rms": 0.028992027460732896,
+      "calc_effl": 32.43395786048166,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 0
+  },
+  {
+    "id": "B_023",
+    "type": "out_of_domain",
+    "query": "帮我设计一个 FOV=3.0度、F/1.5、口径 10.0mm 的镜头",
+    "constraints": {
+      "fov": 3.0,
+      "fnum": 1.5,
+      "aper": 10.0
+    },
+    "ground_truth": {
+      "lens_idx": 95271,
+      "fov": 5.0,
+      "fnum": 1.6,
+      "aper": 0.0,
+      "calc_rms": 0.1779025984390148,
+      "calc_effl": 246.93903365780966,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 1
+  },
+  {
+    "id": "B_032",
+    "type": "out_of_domain",
+    "query": "我要设计一款 5.0 度视场、F/6.2、口径 12.0mm 的镜头",
+    "constraints": {
+      "fov": 5.0,
+      "fnum": 6.2,
+      "aper": 12.0
+    },
+    "ground_truth": {
+      "lens_idx": 7202,
+      "fov": 5.0,
+      "fnum": 6.0,
+      "aper": 10.0,
+      "calc_rms": 0.0034344703540311063,
+      "calc_effl": 247.96387968197345,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 2
+  },
+  {
+    "id": "C_036",
+    "type": "specific",
+    "query": "设计一个 FOV=40.0 度、F 数为 1.8、通光口径 8.0mm 的光学系统，RMS 小于 0.051mm",
+    "constraints": {
+      "fov": 40.0,
+      "fnum": 1.8,
+      "aper": 8.0,
+      "rms_target": 0.051
+    },
+    "ground_truth": {
+      "lens_idx": 13689,
+      "fov": 40.0,
+      "fnum": 1.8,
+      "aper": 2.0,
+      "calc_rms": 0.022165555632271287,
+      "calc_effl": 31.78748097402025,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.051
+    },
+    "global_id": 3
+  },
+  {
+    "id": "B_011",
+    "type": "out_of_domain",
+    "query": "请帮我设计 FOV=100.0度 F/6.5 口径 6.0mm 的镜头方案",
+    "constraints": {
+      "fov": 100.0,
+      "fnum": 6.5,
+      "aper": 6.0
+    },
+    "ground_truth": {
+      "lens_idx": 115449,
+      "fov": 59.0,
+      "fnum": 5.6,
+      "aper": 4.0,
+      "calc_rms": 0.011363838543294709,
+      "calc_effl": 16.195846265893078,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 4
+  },
+  {
+    "id": "D_040",
+    "type": "range",
+    "query": "视场 16.0~22.0 度 光圈 F/2.2~F/2.8 推荐 RMS 最小的方案",
+    "constraints": {
+      "fov_min": 16.0,
+      "fov_max": 22.0,
+      "fnum_min": 2.2,
+      "fnum_max": 2.8
+    },
+    "ground_truth": {
+      "lens_idx": 18707,
+      "fov": 20.0,
+      "fnum": 2.8,
+      "aper": 10.0,
+      "calc_rms": 0.00033227545663415035,
+      "calc_effl": 59.72452604189476,
+      "source": "read_data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        16.0,
+        22.0
+      ],
+      "fnum_range": [
+        2.2,
+        2.8
+      ],
+      "tol_fov": 6.0,
+      "tol_fnum": 0.5999999999999996,
+      "tol_aper": 999
+    },
+    "global_id": 5
+  },
+  {
+    "id": "B_022",
+    "type": "out_of_domain",
+    "query": "帮我设计一个 FOV=45.0度、F/1.0、口径 4.0mm 的镜头",
+    "constraints": {
+      "fov": 45.0,
+      "fnum": 1.0,
+      "aper": 4.0
+    },
+    "ground_truth": {
+      "lens_idx": 101090,
+      "fov": 45.0,
+      "fnum": 2.2,
+      "aper": 2.0,
+      "calc_rms": 0.0034582865465908764,
+      "calc_effl": 22.902741142942975,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 6
+  },
+  {
+    "id": "A_036",
+    "type": "in_domain",
+    "query": "帮我设计一个 FOV=31.0度、F/5.2、口径 0.0mm 的镜头",
+    "constraints": {
+      "fov": 31.0,
+      "fnum": 5.2,
+      "aper": 0.0
+    },
+    "ground_truth": {
+      "lens_idx": 80391,
+      "fov": 31.0,
+      "fnum": 5.2,
+      "aper": 0.0,
+      "calc_rms": 0.05395035260654585,
+      "calc_effl": 38.6494302525748,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 7
+  },
+  {
+    "id": "B_001",
+    "type": "out_of_domain",
+    "query": "帮我设计一个 FOV=45.0度、F/7.0、口径 10.0mm 的镜头",
+    "constraints": {
+      "fov": 45.0,
+      "fnum": 7.0,
+      "aper": 10.0
+    },
+    "ground_truth": {
+      "lens_idx": 23328,
+      "fov": 45.0,
+      "fnum": 6.0,
+      "aper": 10.0,
+      "calc_rms": 0.0022902898430854227,
+      "calc_effl": 21.758951104076026,
+      "source": "read_data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 8
+  },
+  {
+    "id": "C_007",
+    "type": "specific",
+    "query": "请帮我设计 FOV=11.0度 F/5.4 口径 10.0mm 的镜头方案，RMS 小于 0.050mm",
+    "constraints": {
+      "fov": 11.0,
+      "fnum": 5.4,
+      "aper": 10.0,
+      "rms_target": 0.05
+    },
+    "ground_truth": {
+      "lens_idx": 57318,
+      "fov": 11.0,
+      "fnum": 5.4,
+      "aper": 10.0,
+      "calc_rms": 0.008097906558752494,
+      "calc_effl": 121.62571023594413,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.05
+    },
+    "global_id": 9
+  },
+  {
+    "id": "D_017",
+    "type": "range",
+    "query": "设计一个视场 5.0°~25.0°、光圈 F/3.2~4.2 的光学系统",
+    "constraints": {
+      "fov_min": 5.0,
+      "fov_max": 25.0,
+      "fnum_min": 3.2,
+      "fnum_max": 4.2
+    },
+    "ground_truth": {
+      "lens_idx": 139119,
+      "fov": 14.0,
+      "fnum": 4.0,
+      "aper": 2.0,
+      "calc_rms": 1.4020967432909244e-05,
+      "calc_effl": 122.22436761939872,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        5.0,
+        25.0
+      ],
+      "fnum_range": [
+        3.2,
+        4.2
+      ],
+      "tol_fov": 20.0,
+      "tol_fnum": 1.0,
+      "tol_aper": 999
+    },
+    "global_id": 10
+  },
+  {
+    "id": "A_009",
+    "type": "in_domain",
+    "query": "我要设计一款 45.0 度视场、F/2.2、口径 2.0mm 的镜头",
+    "constraints": {
+      "fov": 45.0,
+      "fnum": 2.2,
+      "aper": 2.0
+    },
+    "ground_truth": {
+      "lens_idx": 101090,
+      "fov": 45.0,
+      "fnum": 2.2,
+      "aper": 2.0,
+      "calc_rms": 0.0034582865465908764,
+      "calc_effl": 22.902741142942975,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 11
+  },
+  {
+    "id": "A_007",
+    "type": "in_domain",
+    "query": "我需要设计一款视场角 46.0°、光圈 F/4.4、入瞳口径 8.0mm 的镜头",
+    "constraints": {
+      "fov": 46.0,
+      "fnum": 4.4,
+      "aper": 8.0
+    },
+    "ground_truth": {
+      "lens_idx": 71525,
+      "fov": 46.0,
+      "fnum": 4.4,
+      "aper": 8.0,
+      "calc_rms": 0.012260176961605272,
+      "calc_effl": 24.166155695324584,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 12
+  },
+  {
+    "id": "D_006",
+    "type": "range",
+    "query": "设计一个视场 5.0°~15.0°、光圈 F/4.3~5.9 的光学系统",
+    "constraints": {
+      "fov_min": 5.0,
+      "fov_max": 15.0,
+      "fnum_min": 4.3,
+      "fnum_max": 5.9
+    },
+    "ground_truth": {
+      "lens_idx": 14687,
+      "fov": 6.0,
+      "fnum": 4.4,
+      "aper": 2.0,
+      "calc_rms": 3.5509933182377524e-05,
+      "calc_effl": 246.37633159717808,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        5.0,
+        15.0
+      ],
+      "fnum_range": [
+        4.3,
+        5.9
+      ],
+      "tol_fov": 10.0,
+      "tol_fnum": 1.6000000000000005,
+      "tol_aper": 999
+    },
+    "global_id": 13
+  },
+  {
+    "id": "D_010",
+    "type": "range",
+    "query": "视场 18.0~32.0 度 光圈 F/1.9~F/2.9 推荐 RMS 最小的方案",
+    "constraints": {
+      "fov_min": 18.0,
+      "fov_max": 32.0,
+      "fnum_min": 1.9,
+      "fnum_max": 2.9
+    },
+    "ground_truth": {
+      "lens_idx": 1107,
+      "fov": 25.0,
+      "fnum": 2.8,
+      "aper": 8.0,
+      "calc_rms": 1.5641868884774207e-05,
+      "calc_effl": 46.997020182607464,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        18.0,
+        32.0
+      ],
+      "fnum_range": [
+        1.9,
+        2.9
+      ],
+      "tol_fov": 14.0,
+      "tol_fnum": 1.0,
+      "tol_aper": 999
+    },
+    "global_id": 14
+  },
+  {
+    "id": "A_025",
+    "type": "in_domain",
+    "query": "设计一个 FOV=5.0 度、F 数为 4.4、通光口径 2.0mm 的光学系统",
+    "constraints": {
+      "fov": 5.0,
+      "fnum": 4.4,
+      "aper": 2.0
+    },
+    "ground_truth": {
+      "lens_idx": 14699,
+      "fov": 5.0,
+      "fnum": 4.4,
+      "aper": 2.0,
+      "calc_rms": 0.0002736254037935736,
+      "calc_effl": 246.09259008861636,
+      "source": "read_data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 15
+  },
+  {
+    "id": "D_021",
+    "type": "range",
+    "query": "设计一个视场 36.0°~56.0°、光圈 F/2.0~3.6 的光学系统",
+    "constraints": {
+      "fov_min": 36.0,
+      "fov_max": 56.0,
+      "fnum_min": 2.0,
+      "fnum_max": 3.6
+    },
+    "ground_truth": {
+      "lens_idx": 116235,
+      "fov": 46.0,
+      "fnum": 3.5,
+      "aper": 6.0,
+      "calc_rms": 6.693937417074313e-05,
+      "calc_effl": 23.10811056511185,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        36.0,
+        56.0
+      ],
+      "fnum_range": [
+        2.0,
+        3.6
+      ],
+      "tol_fov": 20.0,
+      "tol_fnum": 1.6,
+      "tol_aper": 999
+    },
+    "global_id": 16
+  },
+  {
+    "id": "D_032",
+    "type": "range",
+    "query": "设计一个视场 26.0°~32.0°、光圈 F/4.3~5.9 的光学系统",
+    "constraints": {
+      "fov_min": 26.0,
+      "fov_max": 32.0,
+      "fnum_min": 4.3,
+      "fnum_max": 5.9
+    },
+    "ground_truth": {
+      "lens_idx": 114476,
+      "fov": 27.0,
+      "fnum": 5.4,
+      "aper": 12.0,
+      "calc_rms": 6.975500417377125e-07,
+      "calc_effl": 46.91575427122026,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        26.0,
+        32.0
+      ],
+      "fnum_range": [
+        4.3,
+        5.9
+      ],
+      "tol_fov": 6.0,
+      "tol_fnum": 1.6000000000000005,
+      "tol_aper": 999
+    },
+    "global_id": 17
+  },
+  {
+    "id": "E_005",
+    "type": "partial",
+    "query": "设计一款通光口径 2.0mm 的光学系统，成像质量尽量好",
+    "constraints": {
+      "aper": 2.0
+    },
+    "ground_truth": {
+      "lens_idx": 139119,
+      "fov": 14.0,
+      "fnum": 4.0,
+      "aper": 2.0,
+      "calc_rms": 1.4020967432909244e-05,
+      "calc_effl": 122.22436761939872,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": false,
+      "has_fnum": false,
+      "has_aper": true,
+      "tol_fov": 999,
+      "tol_fnum": 999,
+      "tol_aper": 1.5
+    },
+    "global_id": 18
+  },
+  {
+    "id": "C_032",
+    "type": "specific",
+    "query": "帮我设计一个 FOV=52.0度、F/3.7、口径 2.0mm 的镜头，RMS 小于 0.487mm",
+    "constraints": {
+      "fov": 52.0,
+      "fnum": 3.7,
+      "aper": 2.0,
+      "rms_target": 0.487
+    },
+    "ground_truth": {
+      "lens_idx": 161838,
+      "fov": 52.0,
+      "fnum": 3.7,
+      "aper": 10.0,
+      "calc_rms": 0.07790982372684402,
+      "calc_effl": 19.234050222120153,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.487
+    },
+    "global_id": 19
+  },
+  {
+    "id": "E_006",
+    "type": "partial",
+    "query": "我需要设计一款 FOV=56.0 度的光学系统，成像质量尽量好",
+    "constraints": {
+      "fov": 56.0
+    },
+    "ground_truth": {
+      "lens_idx": 50507,
+      "fov": 56.0,
+      "fnum": 4.8,
+      "aper": 6.0,
+      "calc_rms": 0.00028696040303614044,
+      "calc_effl": 16.61270957104843,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": false,
+      "has_aper": false,
+      "tol_fov": 1.5,
+      "tol_fnum": 999,
+      "tol_aper": 999
+    },
+    "global_id": 20
+  },
+  {
+    "id": "D_024",
+    "type": "range",
+    "query": "帮我设计视场角 13.0~27.0 度、光圈 F/2.4~F/3.0 的镜头，RMS 越小越好",
+    "constraints": {
+      "fov_min": 13.0,
+      "fov_max": 27.0,
+      "fnum_min": 2.4,
+      "fnum_max": 3.0
+    },
+    "ground_truth": {
+      "lens_idx": 1107,
+      "fov": 25.0,
+      "fnum": 2.8,
+      "aper": 8.0,
+      "calc_rms": 1.5641868884774207e-05,
+      "calc_effl": 46.997020182607464,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        13.0,
+        27.0
+      ],
+      "fnum_range": [
+        2.4,
+        3.0
+      ],
+      "tol_fov": 14.0,
+      "tol_fnum": 0.6000000000000001,
+      "tol_aper": 999
+    },
+    "global_id": 21
+  },
+  {
+    "id": "D_004",
+    "type": "range",
+    "query": "设计一个视场 50.0°~59.0°、光圈 F/4.7~5.3 的光学系统",
+    "constraints": {
+      "fov_min": 50.0,
+      "fov_max": 59.0,
+      "fnum_min": 4.7,
+      "fnum_max": 5.3
+    },
+    "ground_truth": {
+      "lens_idx": 139721,
+      "fov": 51.0,
+      "fnum": 4.8,
+      "aper": 8.0,
+      "calc_rms": 0.00017703526225292017,
+      "calc_effl": 19.93130164225291,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        50.0,
+        59.0
+      ],
+      "fnum_range": [
+        4.7,
+        5.3
+      ],
+      "tol_fov": 9.0,
+      "tol_fnum": 0.5999999999999996,
+      "tol_aper": 999
+    },
+    "global_id": 22
+  },
+  {
+    "id": "E_021",
+    "type": "partial",
+    "query": "设计一个 40.0 度视场、F/5.5 的光学系统",
+    "constraints": {
+      "fov": 40.0,
+      "fnum": 5.5
+    },
+    "ground_truth": {
+      "lens_idx": 33695,
+      "fov": 40.0,
+      "fnum": 5.5,
+      "aper": 2.0,
+      "calc_rms": 0.0012290795312926272,
+      "calc_effl": 26.07465303138715,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "tol_fov": 2.0,
+      "tol_fnum": 0.3,
+      "tol_aper": 999
+    },
+    "global_id": 23
+  },
+  {
+    "id": "B_012",
+    "type": "out_of_domain",
+    "query": "我要设计一款 65.0 度视场、F/6.2、口径 12.0mm 的镜头",
+    "constraints": {
+      "fov": 65.0,
+      "fnum": 6.2,
+      "aper": 12.0
+    },
+    "ground_truth": {
+      "lens_idx": 115449,
+      "fov": 59.0,
+      "fnum": 5.6,
+      "aper": 4.0,
+      "calc_rms": 0.011363838543294709,
+      "calc_effl": 16.195846265893078,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 24
+  },
+  {
+    "id": "B_002",
+    "type": "out_of_domain",
+    "query": "我要设计一款 8.0 度视场、F/1.5、口径 2.0mm 的镜头",
+    "constraints": {
+      "fov": 8.0,
+      "fnum": 1.5,
+      "aper": 2.0
+    },
+    "ground_truth": {
+      "lens_idx": 126757,
+      "fov": 8.0,
+      "fnum": 1.6,
+      "aper": 0.0,
+      "calc_rms": 0.16105568811064802,
+      "calc_effl": 243.7696467745755,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 25
+  },
+  {
+    "id": "B_026",
+    "type": "out_of_domain",
+    "query": "我需要设计一款视场角 80.0°、光圈 F/12.0、入瞳口径 12.0mm 的镜头",
+    "constraints": {
+      "fov": 80.0,
+      "fnum": 12.0,
+      "aper": 12.0
+    },
+    "ground_truth": {
+      "lens_idx": 115449,
+      "fov": 59.0,
+      "fnum": 5.6,
+      "aper": 4.0,
+      "calc_rms": 0.011363838543294709,
+      "calc_effl": 16.195846265893078,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 26
+  },
+  {
+    "id": "E_037",
+    "type": "partial",
+    "query": "我需要视场 22.0°、光圈 F/3.0 的镜头方案，口径不限",
+    "constraints": {
+      "fov": 22.0,
+      "fnum": 3.0
+    },
+    "ground_truth": {
+      "lens_idx": 127798,
+      "fov": 22.0,
+      "fnum": 3.1,
+      "aper": 4.0,
+      "calc_rms": 0.011697323359664662,
+      "calc_effl": 59.7253789576768,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "tol_fov": 2.0,
+      "tol_fnum": 0.3,
+      "tol_aper": 999
+    },
+    "global_id": 27
+  },
+  {
+    "id": "E_009",
+    "type": "partial",
+    "query": "设计一个 F 数为 4.5 的光学系统",
+    "constraints": {
+      "fnum": 4.5
+    },
+    "ground_truth": {
+      "lens_idx": 24573,
+      "fov": 5.0,
+      "fnum": 4.5,
+      "aper": 4.0,
+      "calc_rms": 0.0002999979637923511,
+      "calc_effl": 247.21245319186164,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": false,
+      "has_fnum": true,
+      "has_aper": false,
+      "tol_fov": 999,
+      "tol_fnum": 0.3,
+      "tol_aper": 999
+    },
+    "global_id": 28
+  },
+  {
+    "id": "E_039",
+    "type": "partial",
+    "query": "设计一个 23.0 度视场、F/5.8 的光学系统",
+    "constraints": {
+      "fov": 23.0,
+      "fnum": 5.8
+    },
+    "ground_truth": {
+      "lens_idx": 43283,
+      "fov": 23.0,
+      "fnum": 5.6,
+      "aper": 0.0,
+      "calc_rms": 0.030507949944238694,
+      "calc_effl": 60.005056610675965,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "tol_fov": 2.0,
+      "tol_fnum": 0.3,
+      "tol_aper": 999
+    },
+    "global_id": 29
+  },
+  {
+    "id": "D_036",
+    "type": "range",
+    "query": "我需要一款 FOV 在 49.0 到 59.0 度、F 数 2.6-3.6 的镜头方案",
+    "constraints": {
+      "fov_min": 49.0,
+      "fov_max": 59.0,
+      "fnum_min": 2.6,
+      "fnum_max": 3.6
+    },
+    "ground_truth": {
+      "lens_idx": 146954,
+      "fov": 50.0,
+      "fnum": 3.0,
+      "aper": 8.0,
+      "calc_rms": 0.00208311803095523,
+      "calc_effl": 19.645665743010778,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        49.0,
+        59.0
+      ],
+      "fnum_range": [
+        2.6,
+        3.6
+      ],
+      "tol_fov": 10.0,
+      "tol_fnum": 1.0,
+      "tol_aper": 999
+    },
+    "global_id": 30
+  },
+  {
+    "id": "C_005",
+    "type": "specific",
+    "query": "设计一个 FOV=43.0 度、F 数为 1.8、通光口径 10.0mm 的光学系统，RMS 小于 0.053mm",
+    "constraints": {
+      "fov": 43.0,
+      "fnum": 1.8,
+      "aper": 10.0,
+      "rms_target": 0.053
+    },
+    "ground_truth": {
+      "lens_idx": 131743,
+      "fov": 43.0,
+      "fnum": 1.8,
+      "aper": 2.0,
+      "calc_rms": 0.023956744018126596,
+      "calc_effl": 33.732868767041644,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.053
+    },
+    "global_id": 31
+  },
+  {
+    "id": "B_029",
+    "type": "out_of_domain",
+    "query": "我要设计一款 65.0 度视场、F/6.5、口径 10.0mm 的镜头",
+    "constraints": {
+      "fov": 65.0,
+      "fnum": 6.5,
+      "aper": 10.0
+    },
+    "ground_truth": {
+      "lens_idx": 115449,
+      "fov": 59.0,
+      "fnum": 5.6,
+      "aper": 4.0,
+      "calc_rms": 0.011363838543294709,
+      "calc_effl": 16.195846265893078,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 32
+  },
+  {
+    "id": "E_032",
+    "type": "partial",
+    "query": "帮我设计 FOV=35.0度、F/5.1 的镜头",
+    "constraints": {
+      "fov": 35.0,
+      "fnum": 5.1
+    },
+    "ground_truth": {
+      "lens_idx": 34238,
+      "fov": 35.0,
+      "fnum": 5.1,
+      "aper": 2.0,
+      "calc_rms": 0.006029227845229044,
+      "calc_effl": 31.00027248470696,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "tol_fov": 2.0,
+      "tol_fnum": 0.3,
+      "tol_aper": 999
+    },
+    "global_id": 33
+  },
+  {
+    "id": "D_003",
+    "type": "range",
+    "query": "视场 12.0~26.0 度 光圈 F/3.4~F/4.4 推荐 RMS 最小的方案",
+    "constraints": {
+      "fov_min": 12.0,
+      "fov_max": 26.0,
+      "fnum_min": 3.4,
+      "fnum_max": 4.4
+    },
+    "ground_truth": {
+      "lens_idx": 139119,
+      "fov": 14.0,
+      "fnum": 4.0,
+      "aper": 2.0,
+      "calc_rms": 1.4020967432909244e-05,
+      "calc_effl": 122.22436761939872,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        12.0,
+        26.0
+      ],
+      "fnum_range": [
+        3.4,
+        4.4
+      ],
+      "tol_fov": 14.0,
+      "tol_fnum": 1.0000000000000004,
+      "tol_aper": 999
+    },
+    "global_id": 34
+  },
+  {
+    "id": "D_022",
+    "type": "range",
+    "query": "视场 52.0~59.0 度 光圈 F/1.6~F/2.8 推荐 RMS 最小的方案",
+    "constraints": {
+      "fov_min": 52.0,
+      "fov_max": 59.0,
+      "fnum_min": 1.6,
+      "fnum_max": 2.8
+    },
+    "ground_truth": {
+      "lens_idx": 135535,
+      "fov": 52.0,
+      "fnum": 2.4,
+      "aper": 6.0,
+      "calc_rms": 0.00036819916258176824,
+      "calc_effl": 19.228370623481815,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        52.0,
+        59.0
+      ],
+      "fnum_range": [
+        1.6,
+        2.8
+      ],
+      "tol_fov": 7.0,
+      "tol_fnum": 1.1999999999999997,
+      "tol_aper": 999
+    },
+    "global_id": 35
+  },
+  {
+    "id": "C_039",
+    "type": "specific",
+    "query": "我要设计一款 27.0 度视场、F/3.6、口径 2.0mm 的镜头，RMS 小于 0.015mm",
+    "constraints": {
+      "fov": 27.0,
+      "fnum": 3.6,
+      "aper": 2.0,
+      "rms_target": 0.015
+    },
+    "ground_truth": {
+      "lens_idx": 146898,
+      "fov": 27.0,
+      "fnum": 3.6,
+      "aper": 2.0,
+      "calc_rms": 0.002191844074075929,
+      "calc_effl": 47.25571693270756,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.015
+    },
+    "global_id": 36
+  },
+  {
+    "id": "D_016",
+    "type": "range",
+    "query": "帮我设计视场角 14.0~24.0 度、光圈 F/1.6~F/3.6 的镜头，RMS 越小越好",
+    "constraints": {
+      "fov_min": 14.0,
+      "fov_max": 24.0,
+      "fnum_min": 1.6,
+      "fnum_max": 3.6
+    },
+    "ground_truth": {
+      "lens_idx": 131215,
+      "fov": 16.0,
+      "fnum": 2.0,
+      "aper": 6.0,
+      "calc_rms": 5.627423109064902e-05,
+      "calc_effl": 81.33428088272686,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        14.0,
+        24.0
+      ],
+      "fnum_range": [
+        1.6,
+        3.6
+      ],
+      "tol_fov": 10.0,
+      "tol_fnum": 2.0,
+      "tol_aper": 999
+    },
+    "global_id": 37
+  },
+  {
+    "id": "B_003",
+    "type": "out_of_domain",
+    "query": "帮我设计一个 FOV=65.0度、F/16.0、口径 2.0mm 的镜头",
+    "constraints": {
+      "fov": 65.0,
+      "fnum": 16.0,
+      "aper": 2.0
+    },
+    "ground_truth": {
+      "lens_idx": 115449,
+      "fov": 59.0,
+      "fnum": 5.6,
+      "aper": 4.0,
+      "calc_rms": 0.011363838543294709,
+      "calc_effl": 16.195846265893078,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 38
+  },
+  {
+    "id": "C_023",
+    "type": "specific",
+    "query": "设计一个 FOV=5.0 度、F 数为 5.5、通光口径 6.0mm 的光学系统，RMS 小于 0.023mm",
+    "constraints": {
+      "fov": 5.0,
+      "fnum": 5.5,
+      "aper": 6.0,
+      "rms_target": 0.023
+    },
+    "ground_truth": {
+      "lens_idx": 7689,
+      "fov": 5.0,
+      "fnum": 5.5,
+      "aper": 2.0,
+      "calc_rms": 0.0028422216644656603,
+      "calc_effl": 247.94626856468363,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.023
+    },
+    "global_id": 39
+  },
+  {
+    "id": "B_007",
+    "type": "out_of_domain",
+    "query": "帮我设计一个 FOV=20.0度、F/6.2、口径 8.0mm 的镜头",
+    "constraints": {
+      "fov": 20.0,
+      "fnum": 6.2,
+      "aper": 8.0
+    },
+    "ground_truth": {
+      "lens_idx": 6992,
+      "fov": 20.0,
+      "fnum": 6.0,
+      "aper": 2.0,
+      "calc_rms": 0.00010532214036143629,
+      "calc_effl": 60.00040585441037,
+      "source": "read_data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 40
+  },
+  {
+    "id": "E_033",
+    "type": "partial",
+    "query": "设计一款通光口径 12.0mm 的光学系统，成像质量尽量好",
+    "constraints": {
+      "aper": 12.0
+    },
+    "ground_truth": {
+      "lens_idx": 114476,
+      "fov": 27.0,
+      "fnum": 5.4,
+      "aper": 12.0,
+      "calc_rms": 6.975500417377125e-07,
+      "calc_effl": 46.91575427122026,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": false,
+      "has_fnum": false,
+      "has_aper": true,
+      "tol_fov": 999,
+      "tol_fnum": 999,
+      "tol_aper": 1.5
+    },
+    "global_id": 41
+  },
+  {
+    "id": "B_028",
+    "type": "out_of_domain",
+    "query": "我需要设计一款视场角 70.0°、光圈 F/10.0、入瞳口径 10.0mm 的镜头",
+    "constraints": {
+      "fov": 70.0,
+      "fnum": 10.0,
+      "aper": 10.0
+    },
+    "ground_truth": {
+      "lens_idx": 115449,
+      "fov": 59.0,
+      "fnum": 5.6,
+      "aper": 4.0,
+      "calc_rms": 0.011363838543294709,
+      "calc_effl": 16.195846265893078,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 42
+  },
+  {
+    "id": "B_004",
+    "type": "out_of_domain",
+    "query": "我需要设计一款视场角 12.0°、光圈 F/7.0、入瞳口径 4.0mm 的镜头",
+    "constraints": {
+      "fov": 12.0,
+      "fnum": 7.0,
+      "aper": 4.0
+    },
+    "ground_truth": {
+      "lens_idx": 132980,
+      "fov": 12.0,
+      "fnum": 6.0,
+      "aper": 8.0,
+      "calc_rms": 6.111229812202862e-05,
+      "calc_effl": 123.49340440320371,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 43
+  },
+  {
+    "id": "C_013",
+    "type": "specific",
+    "query": "设计一个 FOV=21.0 度、F 数为 5.7、通光口径 4.0mm 的光学系统，RMS 小于 0.351mm",
+    "constraints": {
+      "fov": 21.0,
+      "fnum": 5.7,
+      "aper": 4.0,
+      "rms_target": 0.351
+    },
+    "ground_truth": {
+      "lens_idx": 126235,
+      "fov": 21.0,
+      "fnum": 5.7,
+      "aper": 10.0,
+      "calc_rms": 0.009988315991173264,
+      "calc_effl": 59.99705012000368,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.351
+    },
+    "global_id": 44
+  },
+  {
+    "id": "E_014",
+    "type": "partial",
+    "query": "设计一款通光口径 10.0mm 的光学系统，成像质量尽量好",
+    "constraints": {
+      "aper": 10.0
+    },
+    "ground_truth": {
+      "lens_idx": 23737,
+      "fov": 5.0,
+      "fnum": 3.9,
+      "aper": 10.0,
+      "calc_rms": 0.00010921111961934475,
+      "calc_effl": 247.7679634417638,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": false,
+      "has_fnum": false,
+      "has_aper": true,
+      "tol_fov": 999,
+      "tol_fnum": 999,
+      "tol_aper": 1.5
+    },
+    "global_id": 45
+  },
+  {
+    "id": "A_002",
+    "type": "in_domain",
+    "query": "请帮我设计 FOV=25.0度 F/4.3 口径 6.0mm 的镜头方案",
+    "constraints": {
+      "fov": 25.0,
+      "fnum": 4.3,
+      "aper": 6.0
+    },
+    "ground_truth": {
+      "lens_idx": 4266,
+      "fov": 25.0,
+      "fnum": 4.3,
+      "aper": 6.0,
+      "calc_rms": 0.004426614980572355,
+      "calc_effl": 46.496286504620706,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 46
+  },
+  {
+    "id": "C_020",
+    "type": "specific",
+    "query": "请帮我设计 FOV=20.0度 F/3.5 口径 8.0mm 的镜头方案，RMS 小于 0.278mm",
+    "constraints": {
+      "fov": 20.0,
+      "fnum": 3.5,
+      "aper": 8.0,
+      "rms_target": 0.278
+    },
+    "ground_truth": {
+      "lens_idx": 12768,
+      "fov": 20.0,
+      "fnum": 3.5,
+      "aper": 12.0,
+      "calc_rms": 0.0022421161621627925,
+      "calc_effl": 59.020965690510224,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.278
+    },
+    "global_id": 47
+  },
+  {
+    "id": "B_014",
+    "type": "out_of_domain",
+    "query": "我需要设计一款视场角 45.0°、光圈 F/12.0、入瞳口径 4.0mm 的镜头",
+    "constraints": {
+      "fov": 45.0,
+      "fnum": 12.0,
+      "aper": 4.0
+    },
+    "ground_truth": {
+      "lens_idx": 23328,
+      "fov": 45.0,
+      "fnum": 6.0,
+      "aper": 10.0,
+      "calc_rms": 0.0022902898430854227,
+      "calc_effl": 21.758951104076026,
+      "source": "read_data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 48
+  },
+  {
+    "id": "D_030",
+    "type": "range",
+    "query": "我需要一款 FOV 在 17.0 到 31.0 度、F 数 3.6-4.6 的镜头方案",
+    "constraints": {
+      "fov_min": 17.0,
+      "fov_max": 31.0,
+      "fnum_min": 3.6,
+      "fnum_max": 4.6
+    },
+    "ground_truth": {
+      "lens_idx": 70908,
+      "fov": 30.0,
+      "fnum": 3.6,
+      "aper": 6.0,
+      "calc_rms": 6.195653611325026e-05,
+      "calc_effl": 37.793438438812416,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        17.0,
+        31.0
+      ],
+      "fnum_range": [
+        3.6,
+        4.6
+      ],
+      "tol_fov": 14.0,
+      "tol_fnum": 0.9999999999999996,
+      "tol_aper": 999
+    },
+    "global_id": 49
+  },
+  {
+    "id": "C_025",
+    "type": "specific",
+    "query": "我需要设计一款视场角 27.0°、光圈 F/4.6、入瞳口径 10.0mm 的镜头，RMS 小于 0.027mm",
+    "constraints": {
+      "fov": 27.0,
+      "fnum": 4.6,
+      "aper": 10.0,
+      "rms_target": 0.027
+    },
+    "ground_truth": {
+      "lens_idx": 101189,
+      "fov": 27.0,
+      "fnum": 4.6,
+      "aper": 2.0,
+      "calc_rms": 0.002301450811491149,
+      "calc_effl": 47.001815085046026,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.027
+    },
+    "global_id": 50
+  },
+  {
+    "id": "C_009",
+    "type": "specific",
+    "query": "我需要设计一款视场角 17.0°、光圈 F/3.1、入瞳口径 6.0mm 的镜头，RMS 小于 0.167mm",
+    "constraints": {
+      "fov": 17.0,
+      "fnum": 3.1,
+      "aper": 6.0,
+      "rms_target": 0.167
+    },
+    "ground_truth": {
+      "lens_idx": 64061,
+      "fov": 17.0,
+      "fnum": 3.1,
+      "aper": 6.0,
+      "calc_rms": 0.05130397029895219,
+      "calc_effl": 83.25257818615601,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.167
+    },
+    "global_id": 51
+  },
+  {
+    "id": "A_003",
+    "type": "in_domain",
+    "query": "我要设计一款 25.0 度视场、F/5.5、口径 10.0mm 的镜头",
+    "constraints": {
+      "fov": 25.0,
+      "fnum": 5.5,
+      "aper": 10.0
+    },
+    "ground_truth": {
+      "lens_idx": 5581,
+      "fov": 25.0,
+      "fnum": 5.5,
+      "aper": 10.0,
+      "calc_rms": 0.015129631364854039,
+      "calc_effl": 46.73581415108122,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 52
+  },
+  {
+    "id": "C_011",
+    "type": "specific",
+    "query": "我需要设计一款视场角 17.0°、光圈 F/3.4、入瞳口径 12.0mm 的镜头，RMS 小于 0.259mm",
+    "constraints": {
+      "fov": 17.0,
+      "fnum": 3.4,
+      "aper": 12.0,
+      "rms_target": 0.259
+    },
+    "ground_truth": {
+      "lens_idx": 149580,
+      "fov": 17.0,
+      "fnum": 3.4,
+      "aper": 10.0,
+      "calc_rms": 0.010363693960948769,
+      "calc_effl": 81.00236886999457,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.259
+    },
+    "global_id": 53
+  },
+  {
+    "id": "A_006",
+    "type": "in_domain",
+    "query": "设计一个 FOV=16.0 度、F 数为 2.3、通光口径 8.0mm 的光学系统",
+    "constraints": {
+      "fov": 16.0,
+      "fnum": 2.3,
+      "aper": 8.0
+    },
+    "ground_truth": {
+      "lens_idx": 14847,
+      "fov": 16.0,
+      "fnum": 2.3,
+      "aper": 8.0,
+      "calc_rms": 0.004421603927016035,
+      "calc_effl": 79.50985918583635,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 54
+  },
+  {
+    "id": "D_002",
+    "type": "range",
+    "query": "帮我设计视场角 31.0~41.0 度、光圈 F/2.4~F/4.0 的镜头，RMS 越小越好",
+    "constraints": {
+      "fov_min": 31.0,
+      "fov_max": 41.0,
+      "fnum_min": 2.4,
+      "fnum_max": 4.0
+    },
+    "ground_truth": {
+      "lens_idx": 132934,
+      "fov": 31.0,
+      "fnum": 2.6,
+      "aper": 4.0,
+      "calc_rms": 6.651556550207683e-05,
+      "calc_effl": 38.21841458571338,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        31.0,
+        41.0
+      ],
+      "fnum_range": [
+        2.4,
+        4.0
+      ],
+      "tol_fov": 10.0,
+      "tol_fnum": 1.6,
+      "tol_aper": 999
+    },
+    "global_id": 55
+  },
+  {
+    "id": "A_032",
+    "type": "in_domain",
+    "query": "设计一个 FOV=22.0 度、F 数为 5.6、通光口径 0.0mm 的光学系统",
+    "constraints": {
+      "fov": 22.0,
+      "fnum": 5.6,
+      "aper": 0.0
+    },
+    "ground_truth": {
+      "lens_idx": 35573,
+      "fov": 22.0,
+      "fnum": 5.6,
+      "aper": 0.0,
+      "calc_rms": 0.029604480081497568,
+      "calc_effl": 60.005040395349305,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 56
+  },
+  {
+    "id": "B_034",
+    "type": "out_of_domain",
+    "query": "设计一个 FOV=45.0 度、F 数为 6.2、通光口径 6.0mm 的光学系统",
+    "constraints": {
+      "fov": 45.0,
+      "fnum": 6.2,
+      "aper": 6.0
+    },
+    "ground_truth": {
+      "lens_idx": 23328,
+      "fov": 45.0,
+      "fnum": 6.0,
+      "aper": 10.0,
+      "calc_rms": 0.0022902898430854227,
+      "calc_effl": 21.758951104076026,
+      "source": "read_data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 57
+  },
+  {
+    "id": "C_035",
+    "type": "specific",
+    "query": "设计一个 FOV=37.0 度、F 数为 6.0、通光口径 8.0mm 的光学系统，RMS 小于 0.113mm",
+    "constraints": {
+      "fov": 37.0,
+      "fnum": 6.0,
+      "aper": 8.0,
+      "rms_target": 0.113
+    },
+    "ground_truth": {
+      "lens_idx": 34639,
+      "fov": 37.0,
+      "fnum": 6.0,
+      "aper": 2.0,
+      "calc_rms": 0.0003963208217824026,
+      "calc_effl": 30.822233262710544,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.113
+    },
+    "global_id": 58
+  },
+  {
+    "id": "A_018",
+    "type": "in_domain",
+    "query": "设计一个 FOV=12.0 度、F 数为 5.1、通光口径 8.0mm 的光学系统",
+    "constraints": {
+      "fov": 12.0,
+      "fnum": 5.1,
+      "aper": 8.0
+    },
+    "ground_truth": {
+      "lens_idx": 85450,
+      "fov": 12.0,
+      "fnum": 5.1,
+      "aper": 8.0,
+      "calc_rms": 0.032680853810444846,
+      "calc_effl": 124.22136870319925,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 59
+  },
+  {
+    "id": "D_012",
+    "type": "range",
+    "query": "我需要一款 FOV 在 45.0 到 51.0 度、F 数 1.7-3.3 的镜头方案",
+    "constraints": {
+      "fov_min": 45.0,
+      "fov_max": 51.0,
+      "fnum_min": 1.7,
+      "fnum_max": 3.3
+    },
+    "ground_truth": {
+      "lens_idx": 73620,
+      "fov": 51.0,
+      "fnum": 2.4,
+      "aper": 6.0,
+      "calc_rms": 0.00013902159932467043,
+      "calc_effl": 19.24944708252035,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        45.0,
+        51.0
+      ],
+      "fnum_range": [
+        1.7,
+        3.3
+      ],
+      "tol_fov": 6.0,
+      "tol_fnum": 1.5999999999999999,
+      "tol_aper": 999
+    },
+    "global_id": 60
+  },
+  {
+    "id": "D_035",
+    "type": "range",
+    "query": "帮我设计视场角 39.0~53.0 度、光圈 F/1.6~F/2.9 的镜头，RMS 越小越好",
+    "constraints": {
+      "fov_min": 39.0,
+      "fov_max": 53.0,
+      "fnum_min": 1.6,
+      "fnum_max": 2.9
+    },
+    "ground_truth": {
+      "lens_idx": 73620,
+      "fov": 51.0,
+      "fnum": 2.4,
+      "aper": 6.0,
+      "calc_rms": 0.00013902159932467043,
+      "calc_effl": 19.24944708252035,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        39.0,
+        53.0
+      ],
+      "fnum_range": [
+        1.6,
+        2.9
+      ],
+      "tol_fov": 14.0,
+      "tol_fnum": 1.2999999999999998,
+      "tol_aper": 999
+    },
+    "global_id": 61
+  },
+  {
+    "id": "B_005",
+    "type": "out_of_domain",
+    "query": "请帮我设计 FOV=62.0度 F/1.0 口径 8.0mm 的镜头方案",
+    "constraints": {
+      "fov": 62.0,
+      "fnum": 1.0,
+      "aper": 8.0
+    },
+    "ground_truth": {
+      "lens_idx": 63127,
+      "fov": 58.0,
+      "fnum": 2.7,
+      "aper": 8.0,
+      "calc_rms": 0.04391591965474608,
+      "calc_effl": 16.74588983867618,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 62
+  },
+  {
+    "id": "C_029",
+    "type": "specific",
+    "query": "我需要设计一款视场角 37.0°、光圈 F/4.8、入瞳口径 8.0mm 的镜头，RMS 小于 0.201mm",
+    "constraints": {
+      "fov": 37.0,
+      "fnum": 4.8,
+      "aper": 8.0,
+      "rms_target": 0.201
+    },
+    "ground_truth": {
+      "lens_idx": 65485,
+      "fov": 37.0,
+      "fnum": 4.8,
+      "aper": 4.0,
+      "calc_rms": 0.014517779172823602,
+      "calc_effl": 31.82687866933715,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.201
+    },
+    "global_id": 63
+  },
+  {
+    "id": "E_027",
+    "type": "partial",
+    "query": "我需要一款光圈 F/6.0 的镜头，RMS 越小越好",
+    "constraints": {
+      "fnum": 6.0
+    },
+    "ground_truth": {
+      "lens_idx": 101598,
+      "fov": 26.0,
+      "fnum": 6.0,
+      "aper": 2.0,
+      "calc_rms": 2.6697452421997434e-05,
+      "calc_effl": 47.22222817392276,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": false,
+      "has_fnum": true,
+      "has_aper": false,
+      "tol_fov": 999,
+      "tol_fnum": 0.3,
+      "tol_aper": 999
+    },
+    "global_id": 64
+  },
+  {
+    "id": "A_016",
+    "type": "in_domain",
+    "query": "请帮我设计 FOV=12.0度 F/3.2 口径 6.0mm 的镜头方案",
+    "constraints": {
+      "fov": 12.0,
+      "fnum": 3.2,
+      "aper": 6.0
+    },
+    "ground_truth": {
+      "lens_idx": 124456,
+      "fov": 12.0,
+      "fnum": 3.2,
+      "aper": 6.0,
+      "calc_rms": 0.001007030506997829,
+      "calc_effl": 121.5007906148695,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 65
+  },
+  {
+    "id": "C_002",
+    "type": "specific",
+    "query": "我要设计一款 29.0 度视场、F/5.2、口径 2.0mm 的镜头，RMS 小于 0.072mm",
+    "constraints": {
+      "fov": 29.0,
+      "fnum": 5.2,
+      "aper": 2.0,
+      "rms_target": 0.072
+    },
+    "ground_truth": {
+      "lens_idx": 69765,
+      "fov": 29.0,
+      "fnum": 5.2,
+      "aper": 6.0,
+      "calc_rms": 0.026208193825000177,
+      "calc_effl": 47.31267748323515,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.072
+    },
+    "global_id": 66
+  },
+  {
+    "id": "D_007",
+    "type": "range",
+    "query": "设计一个视场 35.0°~49.0°、光圈 F/2.4~3.4 的光学系统",
+    "constraints": {
+      "fov_min": 35.0,
+      "fov_max": 49.0,
+      "fnum_min": 2.4,
+      "fnum_max": 3.4
+    },
+    "ground_truth": {
+      "lens_idx": 74940,
+      "fov": 35.0,
+      "fnum": 2.8,
+      "aper": 2.0,
+      "calc_rms": 0.00010005552588856333,
+      "calc_effl": 32.48691891858228,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        35.0,
+        49.0
+      ],
+      "fnum_range": [
+        2.4,
+        3.4
+      ],
+      "tol_fov": 14.0,
+      "tol_fnum": 1.0,
+      "tol_aper": 999
+    },
+    "global_id": 67
+  },
+  {
+    "id": "C_037",
+    "type": "specific",
+    "query": "设计一个 FOV=28.0 度、F 数为 4.4、通光口径 8.0mm 的光学系统，RMS 小于 0.187mm",
+    "constraints": {
+      "fov": 28.0,
+      "fnum": 4.4,
+      "aper": 8.0,
+      "rms_target": 0.187
+    },
+    "ground_truth": {
+      "lens_idx": 35216,
+      "fov": 28.0,
+      "fnum": 4.4,
+      "aper": 6.0,
+      "calc_rms": 0.009804523367795508,
+      "calc_effl": 46.56559834307176,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.187
+    },
+    "global_id": 68
+  },
+  {
+    "id": "C_012",
+    "type": "specific",
+    "query": "帮我设计一个 FOV=21.0度、F/2.6、口径 8.0mm 的镜头，RMS 小于 0.376mm",
+    "constraints": {
+      "fov": 21.0,
+      "fnum": 2.6,
+      "aper": 8.0,
+      "rms_target": 0.376
+    },
+    "ground_truth": {
+      "lens_idx": 66946,
+      "fov": 21.0,
+      "fnum": 2.6,
+      "aper": 10.0,
+      "calc_rms": 0.0035017685749389326,
+      "calc_effl": 59.668134608392926,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.376
+    },
+    "global_id": 69
+  },
+  {
+    "id": "D_034",
+    "type": "range",
+    "query": "我需要一款 FOV 在 27.0 到 37.0 度、F 数 4.9-6.0 的镜头方案",
+    "constraints": {
+      "fov_min": 27.0,
+      "fov_max": 37.0,
+      "fnum_min": 4.9,
+      "fnum_max": 6.0
+    },
+    "ground_truth": {
+      "lens_idx": 114476,
+      "fov": 27.0,
+      "fnum": 5.4,
+      "aper": 12.0,
+      "calc_rms": 6.975500417377125e-07,
+      "calc_effl": 46.91575427122026,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        27.0,
+        37.0
+      ],
+      "fnum_range": [
+        4.9,
+        6.0
+      ],
+      "tol_fov": 10.0,
+      "tol_fnum": 1.0999999999999996,
+      "tol_aper": 999
+    },
+    "global_id": 70
+  },
+  {
+    "id": "D_025",
+    "type": "range",
+    "query": "视场 35.0~49.0 度 光圈 F/3.5~F/5.1 推荐 RMS 最小的方案",
+    "constraints": {
+      "fov_min": 35.0,
+      "fov_max": 49.0,
+      "fnum_min": 3.5,
+      "fnum_max": 5.1
+    },
+    "ground_truth": {
+      "lens_idx": 116235,
+      "fov": 46.0,
+      "fnum": 3.5,
+      "aper": 6.0,
+      "calc_rms": 6.693937417074313e-05,
+      "calc_effl": 23.10811056511185,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        35.0,
+        49.0
+      ],
+      "fnum_range": [
+        3.5,
+        5.1
+      ],
+      "tol_fov": 14.0,
+      "tol_fnum": 1.5999999999999996,
+      "tol_aper": 999
+    },
+    "global_id": 71
+  },
+  {
+    "id": "E_002",
+    "type": "partial",
+    "query": "设计一款通光口径 12.0mm 的光学系统，成像质量尽量好",
+    "constraints": {
+      "aper": 12.0
+    },
+    "ground_truth": {
+      "lens_idx": 114476,
+      "fov": 27.0,
+      "fnum": 5.4,
+      "aper": 12.0,
+      "calc_rms": 6.975500417377125e-07,
+      "calc_effl": 46.91575427122026,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": false,
+      "has_fnum": false,
+      "has_aper": true,
+      "tol_fov": 999,
+      "tol_fnum": 999,
+      "tol_aper": 1.5
+    },
+    "global_id": 72
+  },
+  {
+    "id": "A_035",
+    "type": "in_domain",
+    "query": "帮我设计一个 FOV=13.0度、F/3.6、口径 6.0mm 的镜头",
+    "constraints": {
+      "fov": 13.0,
+      "fnum": 3.6,
+      "aper": 6.0
+    },
+    "ground_truth": {
+      "lens_idx": 35071,
+      "fov": 13.0,
+      "fnum": 3.6,
+      "aper": 6.0,
+      "calc_rms": 0.0015224165505180651,
+      "calc_effl": 120.97904909183404,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 73
+  },
+  {
+    "id": "A_020",
+    "type": "in_domain",
+    "query": "我要设计一款 45.0 度视场、F/5.1、口径 4.0mm 的镜头",
+    "constraints": {
+      "fov": 45.0,
+      "fnum": 5.1,
+      "aper": 4.0
+    },
+    "ground_truth": {
+      "lens_idx": 703,
+      "fov": 45.0,
+      "fnum": 5.1,
+      "aper": 4.0,
+      "calc_rms": 0.017843154421408117,
+      "calc_effl": 22.184006799934618,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 74
+  },
+  {
+    "id": "A_029",
+    "type": "in_domain",
+    "query": "我要设计一款 4.0 度视场、F/5.5、口径 2.0mm 的镜头",
+    "constraints": {
+      "fov": 4.0,
+      "fnum": 5.5,
+      "aper": 2.0
+    },
+    "ground_truth": {
+      "lens_idx": 149,
+      "fov": 4.0,
+      "fnum": 5.5,
+      "aper": 2.0,
+      "calc_rms": 0.0021578328210062714,
+      "calc_effl": 247.9501136954521,
+      "source": "read_data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 75
+  },
+  {
+    "id": "E_030",
+    "type": "partial",
+    "query": "帮我设计一个入瞳口径 2.0mm 的镜头",
+    "constraints": {
+      "aper": 2.0
+    },
+    "ground_truth": {
+      "lens_idx": 139119,
+      "fov": 14.0,
+      "fnum": 4.0,
+      "aper": 2.0,
+      "calc_rms": 1.4020967432909244e-05,
+      "calc_effl": 122.22436761939872,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": false,
+      "has_fnum": false,
+      "has_aper": true,
+      "tol_fov": 999,
+      "tol_fnum": 999,
+      "tol_aper": 1.5
+    },
+    "global_id": 76
+  },
+  {
+    "id": "A_015",
+    "type": "in_domain",
+    "query": "我要设计一款 42.0 度视场、F/3.6、口径 0.0mm 的镜头",
+    "constraints": {
+      "fov": 42.0,
+      "fnum": 3.6,
+      "aper": 0.0
+    },
+    "ground_truth": {
+      "lens_idx": 3161,
+      "fov": 42.0,
+      "fnum": 3.6,
+      "aper": 0.0,
+      "calc_rms": 0.03190574343022175,
+      "calc_effl": 27.272427006675457,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 77
+  },
+  {
+    "id": "D_038",
+    "type": "range",
+    "query": "我需要一款 FOV 在 33.0 到 53.0 度、F 数 1.6-3.0 的镜头方案",
+    "constraints": {
+      "fov_min": 33.0,
+      "fov_max": 53.0,
+      "fnum_min": 1.6,
+      "fnum_max": 3.0
+    },
+    "ground_truth": {
+      "lens_idx": 74940,
+      "fov": 35.0,
+      "fnum": 2.8,
+      "aper": 2.0,
+      "calc_rms": 0.00010005552588856333,
+      "calc_effl": 32.48691891858228,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        33.0,
+        53.0
+      ],
+      "fnum_range": [
+        1.6,
+        3.0
+      ],
+      "tol_fov": 20.0,
+      "tol_fnum": 1.4,
+      "tol_aper": 999
+    },
+    "global_id": 78
+  },
+  {
+    "id": "E_010",
+    "type": "partial",
+    "query": "我需要设计一款 FOV=13.0 度的光学系统，成像质量尽量好",
+    "constraints": {
+      "fov": 13.0
+    },
+    "ground_truth": {
+      "lens_idx": 104994,
+      "fov": 13.0,
+      "fnum": 4.0,
+      "aper": 2.0,
+      "calc_rms": 0.00010559860462763084,
+      "calc_effl": 122.22814307621277,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": false,
+      "has_aper": false,
+      "tol_fov": 1.5,
+      "tol_fnum": 999,
+      "tol_aper": 999
+    },
+    "global_id": 79
+  },
+  {
+    "id": "D_039",
+    "type": "range",
+    "query": "视场 39.0~59.0 度 光圈 F/5.0~F/6.0 推荐 RMS 最小的方案",
+    "constraints": {
+      "fov_min": 39.0,
+      "fov_max": 59.0,
+      "fnum_min": 5.0,
+      "fnum_max": 6.0
+    },
+    "ground_truth": {
+      "lens_idx": 20491,
+      "fov": 41.0,
+      "fnum": 6.0,
+      "aper": 6.0,
+      "calc_rms": 4.1880165352186606e-05,
+      "calc_effl": 25.533802663822847,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        39.0,
+        59.0
+      ],
+      "fnum_range": [
+        5.0,
+        6.0
+      ],
+      "tol_fov": 20.0,
+      "tol_fnum": 1.0,
+      "tol_aper": 999
+    },
+    "global_id": 80
+  },
+  {
+    "id": "D_028",
+    "type": "range",
+    "query": "设计一个视场 24.0°~30.0°、光圈 F/3.5~5.1 的光学系统",
+    "constraints": {
+      "fov_min": 24.0,
+      "fov_max": 30.0,
+      "fnum_min": 3.5,
+      "fnum_max": 5.1
+    },
+    "ground_truth": {
+      "lens_idx": 70908,
+      "fov": 30.0,
+      "fnum": 3.6,
+      "aper": 6.0,
+      "calc_rms": 6.195653611325026e-05,
+      "calc_effl": 37.793438438812416,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        24.0,
+        30.0
+      ],
+      "fnum_range": [
+        3.5,
+        5.1
+      ],
+      "tol_fov": 6.0,
+      "tol_fnum": 1.5999999999999996,
+      "tol_aper": 999
+    },
+    "global_id": 81
+  },
+  {
+    "id": "D_026",
+    "type": "range",
+    "query": "我需要一款 FOV 在 39.0 到 45.0 度、F 数 3.8-5.8 的镜头方案",
+    "constraints": {
+      "fov_min": 39.0,
+      "fov_max": 45.0,
+      "fnum_min": 3.8,
+      "fnum_max": 5.8
+    },
+    "ground_truth": {
+      "lens_idx": 11697,
+      "fov": 40.0,
+      "fnum": 4.0,
+      "aper": 8.0,
+      "calc_rms": 0.0001445080612870904,
+      "calc_effl": 27.87401125274311,
+      "source": "read_data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        39.0,
+        45.0
+      ],
+      "fnum_range": [
+        3.8,
+        5.8
+      ],
+      "tol_fov": 6.0,
+      "tol_fnum": 2.0,
+      "tol_aper": 999
+    },
+    "global_id": 82
+  },
+  {
+    "id": "D_014",
+    "type": "range",
+    "query": "我需要一款 FOV 在 47.0 到 59.0 度、F 数 1.6-2.3 的镜头方案",
+    "constraints": {
+      "fov_min": 47.0,
+      "fov_max": 59.0,
+      "fnum_min": 1.6,
+      "fnum_max": 2.3
+    },
+    "ground_truth": {
+      "lens_idx": 98410,
+      "fov": 50.0,
+      "fnum": 2.3,
+      "aper": 6.0,
+      "calc_rms": 0.00034096288385847013,
+      "calc_effl": 19.189980700448036,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        47.0,
+        59.0
+      ],
+      "fnum_range": [
+        1.6,
+        2.3
+      ],
+      "tol_fov": 12.0,
+      "tol_fnum": 0.6999999999999997,
+      "tol_aper": 999
+    },
+    "global_id": 83
+  },
+  {
+    "id": "D_019",
+    "type": "range",
+    "query": "视场 53.0~59.0 度 光圈 F/4.1~F/5.1 推荐 RMS 最小的方案",
+    "constraints": {
+      "fov_min": 53.0,
+      "fov_max": 59.0,
+      "fnum_min": 4.1,
+      "fnum_max": 5.1
+    },
+    "ground_truth": {
+      "lens_idx": 50507,
+      "fov": 56.0,
+      "fnum": 4.8,
+      "aper": 6.0,
+      "calc_rms": 0.00028696040303614044,
+      "calc_effl": 16.61270957104843,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        53.0,
+        59.0
+      ],
+      "fnum_range": [
+        4.1,
+        5.1
+      ],
+      "tol_fov": 6.0,
+      "tol_fnum": 1.0,
+      "tol_aper": 999
+    },
+    "global_id": 84
+  },
+  {
+    "id": "E_007",
+    "type": "partial",
+    "query": "我需要一款光圈 F/2.2 的镜头，RMS 越小越好",
+    "constraints": {
+      "fnum": 2.2
+    },
+    "ground_truth": {
+      "lens_idx": 22954,
+      "fov": 15.0,
+      "fnum": 2.2,
+      "aper": 6.0,
+      "calc_rms": 0.00011855982060552899,
+      "calc_effl": 81.00308660661115,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": false,
+      "has_fnum": true,
+      "has_aper": false,
+      "tol_fov": 999,
+      "tol_fnum": 0.3,
+      "tol_aper": 999
+    },
+    "global_id": 85
+  },
+  {
+    "id": "C_026",
+    "type": "specific",
+    "query": "设计一个 FOV=10.0 度、F 数为 2.6、通光口径 4.0mm 的光学系统，RMS 小于 0.144mm",
+    "constraints": {
+      "fov": 10.0,
+      "fnum": 2.6,
+      "aper": 4.0,
+      "rms_target": 0.144
+    },
+    "ground_truth": {
+      "lens_idx": 78589,
+      "fov": 10.0,
+      "fnum": 2.6,
+      "aper": 8.0,
+      "calc_rms": 0.003306894939510443,
+      "calc_effl": 121.92860936589169,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.144
+    },
+    "global_id": 86
+  },
+  {
+    "id": "A_037",
+    "type": "in_domain",
+    "query": "帮我设计一个 FOV=41.0度、F/4.2、口径 8.0mm 的镜头",
+    "constraints": {
+      "fov": 41.0,
+      "fnum": 4.2,
+      "aper": 8.0
+    },
+    "ground_truth": {
+      "lens_idx": 125441,
+      "fov": 41.0,
+      "fnum": 4.2,
+      "aper": 8.0,
+      "calc_rms": 0.09136908490925032,
+      "calc_effl": 26.37502743802375,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 87
+  },
+  {
+    "id": "E_035",
+    "type": "partial",
+    "query": "设计一款通光口径 8.0mm 的光学系统，成像质量尽量好",
+    "constraints": {
+      "aper": 8.0
+    },
+    "ground_truth": {
+      "lens_idx": 1107,
+      "fov": 25.0,
+      "fnum": 2.8,
+      "aper": 8.0,
+      "calc_rms": 1.5641868884774207e-05,
+      "calc_effl": 46.997020182607464,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": false,
+      "has_fnum": false,
+      "has_aper": true,
+      "tol_fov": 999,
+      "tol_fnum": 999,
+      "tol_aper": 1.5
+    },
+    "global_id": 88
+  },
+  {
+    "id": "A_005",
+    "type": "in_domain",
+    "query": "设计一个 FOV=45.0 度、F 数为 5.7、通光口径 10.0mm 的光学系统",
+    "constraints": {
+      "fov": 45.0,
+      "fnum": 5.7,
+      "aper": 10.0
+    },
+    "ground_truth": {
+      "lens_idx": 17823,
+      "fov": 45.0,
+      "fnum": 5.7,
+      "aper": 10.0,
+      "calc_rms": 0.028263259486115837,
+      "calc_effl": 22.01802370288499,
+      "source": "read_data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 89
+  },
+  {
+    "id": "A_038",
+    "type": "in_domain",
+    "query": "设计一个 FOV=35.0 度、F 数为 4.7、通光口径 0.0mm 的光学系统",
+    "constraints": {
+      "fov": 35.0,
+      "fnum": 4.7,
+      "aper": 0.0
+    },
+    "ground_truth": {
+      "lens_idx": 86754,
+      "fov": 35.0,
+      "fnum": 4.7,
+      "aper": 0.0,
+      "calc_rms": 0.01667392843342052,
+      "calc_effl": 31.84417063060464,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 90
+  },
+  {
+    "id": "B_021",
+    "type": "out_of_domain",
+    "query": "我要设计一款 2.0 度视场、F/1.4、口径 10.0mm 的镜头",
+    "constraints": {
+      "fov": 2.0,
+      "fnum": 1.4,
+      "aper": 10.0
+    },
+    "ground_truth": {
+      "lens_idx": 10434,
+      "fov": 4.0,
+      "fnum": 3.3,
+      "aper": 10.0,
+      "calc_rms": 0.014477254819016995,
+      "calc_effl": 247.85009661929183,
+      "source": "read_data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 91
+  },
+  {
+    "id": "B_037",
+    "type": "out_of_domain",
+    "query": "我需要设计一款视场角 5.0°、光圈 F/10.0、入瞳口径 8.0mm 的镜头",
+    "constraints": {
+      "fov": 5.0,
+      "fnum": 10.0,
+      "aper": 8.0
+    },
+    "ground_truth": {
+      "lens_idx": 7202,
+      "fov": 5.0,
+      "fnum": 6.0,
+      "aper": 10.0,
+      "calc_rms": 0.0034344703540311063,
+      "calc_effl": 247.96387968197345,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 92
+  },
+  {
+    "id": "E_038",
+    "type": "partial",
+    "query": "帮我设计一个视场角 48.0° 的镜头方案",
+    "constraints": {
+      "fov": 48.0
+    },
+    "ground_truth": {
+      "lens_idx": 144736,
+      "fov": 48.0,
+      "fnum": 2.6,
+      "aper": 0.0,
+      "calc_rms": 0.0009497878314303347,
+      "calc_effl": 26.269171407364095,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": false,
+      "has_aper": false,
+      "tol_fov": 1.5,
+      "tol_fnum": 999,
+      "tol_aper": 999
+    },
+    "global_id": 93
+  },
+  {
+    "id": "E_016",
+    "type": "partial",
+    "query": "设计一个 56.0 度视场的镜头，RMS 越小越好",
+    "constraints": {
+      "fov": 56.0
+    },
+    "ground_truth": {
+      "lens_idx": 50507,
+      "fov": 56.0,
+      "fnum": 4.8,
+      "aper": 6.0,
+      "calc_rms": 0.00028696040303614044,
+      "calc_effl": 16.61270957104843,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": false,
+      "has_aper": false,
+      "tol_fov": 1.5,
+      "tol_fnum": 999,
+      "tol_aper": 999
+    },
+    "global_id": 94
+  },
+  {
+    "id": "B_013",
+    "type": "out_of_domain",
+    "query": "请帮我设计 FOV=3.0度 F/1.4 口径 12.0mm 的镜头方案",
+    "constraints": {
+      "fov": 3.0,
+      "fnum": 1.4,
+      "aper": 12.0
+    },
+    "ground_truth": {
+      "lens_idx": 95271,
+      "fov": 5.0,
+      "fnum": 1.6,
+      "aper": 0.0,
+      "calc_rms": 0.1779025984390148,
+      "calc_effl": 246.93903365780966,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 95
+  },
+  {
+    "id": "A_001",
+    "type": "in_domain",
+    "query": "请帮我设计 FOV=23.0度 F/5.4 口径 0.0mm 的镜头方案",
+    "constraints": {
+      "fov": 23.0,
+      "fnum": 5.4,
+      "aper": 0.0
+    },
+    "ground_truth": {
+      "lens_idx": 147015,
+      "fov": 23.0,
+      "fnum": 5.4,
+      "aper": 0.0,
+      "calc_rms": 0.03415455056709681,
+      "calc_effl": 60.005353562148386,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 96
+  },
+  {
+    "id": "C_019",
+    "type": "specific",
+    "query": "帮我设计一个 FOV=5.0度、F/3.4、口径 8.0mm 的镜头，RMS 小于 0.103mm",
+    "constraints": {
+      "fov": 5.0,
+      "fnum": 3.4,
+      "aper": 8.0,
+      "rms_target": 0.103
+    },
+    "ground_truth": {
+      "lens_idx": 131920,
+      "fov": 5.0,
+      "fnum": 3.4,
+      "aper": 4.0,
+      "calc_rms": 0.0036249091619561793,
+      "calc_effl": 247.99265550448422,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.103
+    },
+    "global_id": 97
+  },
+  {
+    "id": "A_010",
+    "type": "in_domain",
+    "query": "我要设计一款 5.0 度视场、F/3.9、口径 6.0mm 的镜头",
+    "constraints": {
+      "fov": 5.0,
+      "fnum": 3.9,
+      "aper": 6.0
+    },
+    "ground_truth": {
+      "lens_idx": 53385,
+      "fov": 5.0,
+      "fnum": 3.9,
+      "aper": 6.0,
+      "calc_rms": 0.004752531423066346,
+      "calc_effl": 247.9890697753447,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 98
+  },
+  {
+    "id": "C_040",
+    "type": "specific",
+    "query": "我需要设计一款视场角 35.0°、光圈 F/3.0、入瞳口径 6.0mm 的镜头，RMS 小于 0.205mm",
+    "constraints": {
+      "fov": 35.0,
+      "fnum": 3.0,
+      "aper": 6.0,
+      "rms_target": 0.205
+    },
+    "ground_truth": {
+      "lens_idx": 63365,
+      "fov": 35.0,
+      "fnum": 3.0,
+      "aper": 8.0,
+      "calc_rms": 0.012382800151185123,
+      "calc_effl": 31.714304564615407,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.205
+    },
+    "global_id": 99
+  },
+  {
+    "id": "A_023",
+    "type": "in_domain",
+    "query": "我需要设计一款视场角 11.0°、光圈 F/3.8、入瞳口径 2.0mm 的镜头",
+    "constraints": {
+      "fov": 11.0,
+      "fnum": 3.8,
+      "aper": 2.0
+    },
+    "ground_truth": {
+      "lens_idx": 152279,
+      "fov": 11.0,
+      "fnum": 3.8,
+      "aper": 2.0,
+      "calc_rms": 0.0003186928541689872,
+      "calc_effl": 122.22396970252201,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 100
+  },
+  {
+    "id": "C_010",
+    "type": "specific",
+    "query": "我要设计一款 48.0 度视场、F/5.2、口径 6.0mm 的镜头，RMS 小于 0.229mm",
+    "constraints": {
+      "fov": 48.0,
+      "fnum": 5.2,
+      "aper": 6.0,
+      "rms_target": 0.229
+    },
+    "ground_truth": {
+      "lens_idx": 146176,
+      "fov": 48.0,
+      "fnum": 5.2,
+      "aper": 6.0,
+      "calc_rms": 0.043221171733155234,
+      "calc_effl": 22.69754373139753,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.229
+    },
+    "global_id": 101
+  },
+  {
+    "id": "A_021",
+    "type": "in_domain",
+    "query": "帮我设计一个 FOV=50.0度、F/2.1、口径 2.0mm 的镜头",
+    "constraints": {
+      "fov": 50.0,
+      "fnum": 2.1,
+      "aper": 2.0
+    },
+    "ground_truth": {
+      "lens_idx": 107891,
+      "fov": 50.0,
+      "fnum": 2.1,
+      "aper": 2.0,
+      "calc_rms": 0.02681155742682083,
+      "calc_effl": 22.17790525448841,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 102
+  },
+  {
+    "id": "A_011",
+    "type": "in_domain",
+    "query": "设计一个 FOV=25.0 度、F 数为 2.6、通光口径 12.0mm 的光学系统",
+    "constraints": {
+      "fov": 25.0,
+      "fnum": 2.6,
+      "aper": 12.0
+    },
+    "ground_truth": {
+      "lens_idx": 123317,
+      "fov": 25.0,
+      "fnum": 2.6,
+      "aper": 12.0,
+      "calc_rms": 0.0010703784967874923,
+      "calc_effl": 47.10327361095607,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 103
+  },
+  {
+    "id": "E_034",
+    "type": "partial",
+    "query": "设计一个 45.0 度视场的镜头，RMS 越小越好",
+    "constraints": {
+      "fov": 45.0
+    },
+    "ground_truth": {
+      "lens_idx": 155877,
+      "fov": 45.0,
+      "fnum": 3.5,
+      "aper": 6.0,
+      "calc_rms": 6.954236572622308e-05,
+      "calc_effl": 21.413032438556762,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": false,
+      "has_aper": false,
+      "tol_fov": 1.5,
+      "tol_fnum": 999,
+      "tol_aper": 999
+    },
+    "global_id": 104
+  },
+  {
+    "id": "A_034",
+    "type": "in_domain",
+    "query": "我需要设计一款视场角 20.0°、光圈 F/5.7、入瞳口径 10.0mm 的镜头",
+    "constraints": {
+      "fov": 20.0,
+      "fnum": 5.7,
+      "aper": 10.0
+    },
+    "ground_truth": {
+      "lens_idx": 16978,
+      "fov": 20.0,
+      "fnum": 5.7,
+      "aper": 10.0,
+      "calc_rms": 0.01655146727309668,
+      "calc_effl": 59.0704979899051,
+      "source": "read_data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 105
+  },
+  {
+    "id": "A_028",
+    "type": "in_domain",
+    "query": "设计一个 FOV=32.0 度、F 数为 5.6、通光口径 8.0mm 的光学系统",
+    "constraints": {
+      "fov": 32.0,
+      "fnum": 5.6,
+      "aper": 8.0
+    },
+    "ground_truth": {
+      "lens_idx": 25259,
+      "fov": 32.0,
+      "fnum": 5.6,
+      "aper": 8.0,
+      "calc_rms": 0.0012962082028708166,
+      "calc_effl": 38.27514489704151,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 106
+  },
+  {
+    "id": "E_023",
+    "type": "partial",
+    "query": "帮我设计 FOV=35.0度、F/3.6 的镜头",
+    "constraints": {
+      "fov": 35.0,
+      "fnum": 3.6
+    },
+    "ground_truth": {
+      "lens_idx": 153092,
+      "fov": 35.0,
+      "fnum": 3.6,
+      "aper": 6.0,
+      "calc_rms": 0.0030465063099902935,
+      "calc_effl": 31.579403853383802,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "tol_fov": 2.0,
+      "tol_fnum": 0.3,
+      "tol_aper": 999
+    },
+    "global_id": 107
+  },
+  {
+    "id": "E_012",
+    "type": "partial",
+    "query": "设计一个 F 数为 4.9 的光学系统",
+    "constraints": {
+      "fnum": 4.9
+    },
+    "ground_truth": {
+      "lens_idx": 53303,
+      "fov": 21.0,
+      "fnum": 4.9,
+      "aper": 0.0,
+      "calc_rms": 0.0019467858115452942,
+      "calc_effl": 59.278156092145785,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": false,
+      "has_fnum": true,
+      "has_aper": false,
+      "tol_fov": 999,
+      "tol_fnum": 0.3,
+      "tol_aper": 999
+    },
+    "global_id": 108
+  },
+  {
+    "id": "D_018",
+    "type": "range",
+    "query": "帮我设计视场角 11.0~17.0 度、光圈 F/5.0~F/6.0 的镜头，RMS 越小越好",
+    "constraints": {
+      "fov_min": 11.0,
+      "fov_max": 17.0,
+      "fnum_min": 5.0,
+      "fnum_max": 6.0
+    },
+    "ground_truth": {
+      "lens_idx": 132980,
+      "fov": 12.0,
+      "fnum": 6.0,
+      "aper": 8.0,
+      "calc_rms": 6.111229812202862e-05,
+      "calc_effl": 123.49340440320371,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        11.0,
+        17.0
+      ],
+      "fnum_range": [
+        5.0,
+        6.0
+      ],
+      "tol_fov": 6.0,
+      "tol_fnum": 1.0,
+      "tol_aper": 999
+    },
+    "global_id": 109
+  },
+  {
+    "id": "A_013",
+    "type": "in_domain",
+    "query": "我需要设计一款视场角 10.0°、光圈 F/2.2、入瞳口径 12.0mm 的镜头",
+    "constraints": {
+      "fov": 10.0,
+      "fnum": 2.2,
+      "aper": 12.0
+    },
+    "ground_truth": {
+      "lens_idx": 883,
+      "fov": 10.0,
+      "fnum": 2.2,
+      "aper": 12.0,
+      "calc_rms": 0.03326324650763032,
+      "calc_effl": 121.60509400954625,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 110
+  },
+  {
+    "id": "D_015",
+    "type": "range",
+    "query": "我需要一款 FOV 在 39.0 到 53.0 度、F 数 1.6-3.2 的镜头方案",
+    "constraints": {
+      "fov_min": 39.0,
+      "fov_max": 53.0,
+      "fnum_min": 1.6,
+      "fnum_max": 3.2
+    },
+    "ground_truth": {
+      "lens_idx": 73620,
+      "fov": 51.0,
+      "fnum": 2.4,
+      "aper": 6.0,
+      "calc_rms": 0.00013902159932467043,
+      "calc_effl": 19.24944708252035,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        39.0,
+        53.0
+      ],
+      "fnum_range": [
+        1.6,
+        3.2
+      ],
+      "tol_fov": 14.0,
+      "tol_fnum": 1.6,
+      "tol_aper": 999
+    },
+    "global_id": 111
+  },
+  {
+    "id": "E_029",
+    "type": "partial",
+    "query": "帮我设计一个入瞳口径 10.0mm 的镜头",
+    "constraints": {
+      "aper": 10.0
+    },
+    "ground_truth": {
+      "lens_idx": 23737,
+      "fov": 5.0,
+      "fnum": 3.9,
+      "aper": 10.0,
+      "calc_rms": 0.00010921111961934475,
+      "calc_effl": 247.7679634417638,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": false,
+      "has_fnum": false,
+      "has_aper": true,
+      "tol_fov": 999,
+      "tol_fnum": 999,
+      "tol_aper": 1.5
+    },
+    "global_id": 112
+  },
+  {
+    "id": "A_008",
+    "type": "in_domain",
+    "query": "帮我设计一个 FOV=15.0度、F/2.0、口径 6.0mm 的镜头",
+    "constraints": {
+      "fov": 15.0,
+      "fnum": 2.0,
+      "aper": 6.0
+    },
+    "ground_truth": {
+      "lens_idx": 45441,
+      "fov": 15.0,
+      "fnum": 2.0,
+      "aper": 6.0,
+      "calc_rms": 0.0011190081824038083,
+      "calc_effl": 81.32274691691867,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 113
+  },
+  {
+    "id": "B_040",
+    "type": "out_of_domain",
+    "query": "帮我设计一个 FOV=5.0度、F/1.5、口径 2.0mm 的镜头",
+    "constraints": {
+      "fov": 5.0,
+      "fnum": 1.5,
+      "aper": 2.0
+    },
+    "ground_truth": {
+      "lens_idx": 95271,
+      "fov": 5.0,
+      "fnum": 1.6,
+      "aper": 0.0,
+      "calc_rms": 0.1779025984390148,
+      "calc_effl": 246.93903365780966,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 114
+  },
+  {
+    "id": "C_030",
+    "type": "specific",
+    "query": "帮我设计一个 FOV=38.0度、F/4.7、口径 10.0mm 的镜头，RMS 小于 0.275mm",
+    "constraints": {
+      "fov": 38.0,
+      "fnum": 4.7,
+      "aper": 10.0,
+      "rms_target": 0.275
+    },
+    "ground_truth": {
+      "lens_idx": 143012,
+      "fov": 38.0,
+      "fnum": 4.7,
+      "aper": 10.0,
+      "calc_rms": 0.02671467925698345,
+      "calc_effl": 30.82541392204412,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.275
+    },
+    "global_id": 115
+  },
+  {
+    "id": "A_040",
+    "type": "in_domain",
+    "query": "设计一个 FOV=11.0 度、F 数为 3.3、通光口径 6.0mm 的光学系统",
+    "constraints": {
+      "fov": 11.0,
+      "fnum": 3.3,
+      "aper": 6.0
+    },
+    "ground_truth": {
+      "lens_idx": 130735,
+      "fov": 11.0,
+      "fnum": 3.3,
+      "aper": 6.0,
+      "calc_rms": 0.002503650726290677,
+      "calc_effl": 121.08367160409696,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 116
+  },
+  {
+    "id": "B_015",
+    "type": "out_of_domain",
+    "query": "我需要设计一款视场角 45.0°、光圈 F/1.5、入瞳口径 6.0mm 的镜头",
+    "constraints": {
+      "fov": 45.0,
+      "fnum": 1.5,
+      "aper": 6.0
+    },
+    "ground_truth": {
+      "lens_idx": 101090,
+      "fov": 45.0,
+      "fnum": 2.2,
+      "aper": 2.0,
+      "calc_rms": 0.0034582865465908764,
+      "calc_effl": 22.902741142942975,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 117
+  },
+  {
+    "id": "E_008",
+    "type": "partial",
+    "query": "设计一个 27.0 度视场的镜头，RMS 越小越好",
+    "constraints": {
+      "fov": 27.0
+    },
+    "ground_truth": {
+      "lens_idx": 114476,
+      "fov": 27.0,
+      "fnum": 5.4,
+      "aper": 12.0,
+      "calc_rms": 6.975500417377125e-07,
+      "calc_effl": 46.91575427122026,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": false,
+      "has_aper": false,
+      "tol_fov": 1.5,
+      "tol_fnum": 999,
+      "tol_aper": 999
+    },
+    "global_id": 118
+  },
+  {
+    "id": "D_031",
+    "type": "range",
+    "query": "设计一个视场 20.0°~40.0°、光圈 F/5.3~6.0 的光学系统",
+    "constraints": {
+      "fov_min": 20.0,
+      "fov_max": 40.0,
+      "fnum_min": 5.3,
+      "fnum_max": 6.0
+    },
+    "ground_truth": {
+      "lens_idx": 114476,
+      "fov": 27.0,
+      "fnum": 5.4,
+      "aper": 12.0,
+      "calc_rms": 6.975500417377125e-07,
+      "calc_effl": 46.91575427122026,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        20.0,
+        40.0
+      ],
+      "fnum_range": [
+        5.3,
+        6.0
+      ],
+      "tol_fov": 20.0,
+      "tol_fnum": 0.7000000000000002,
+      "tol_aper": 999
+    },
+    "global_id": 119
+  },
+  {
+    "id": "C_014",
+    "type": "specific",
+    "query": "我要设计一款 46.0 度视场、F/3.1、口径 6.0mm 的镜头，RMS 小于 0.250mm",
+    "constraints": {
+      "fov": 46.0,
+      "fnum": 3.1,
+      "aper": 6.0,
+      "rms_target": 0.25
+    },
+    "ground_truth": {
+      "lens_idx": 34930,
+      "fov": 46.0,
+      "fnum": 3.1,
+      "aper": 12.0,
+      "calc_rms": 0.03076523794130846,
+      "calc_effl": 23.819101276544604,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.25
+    },
+    "global_id": 120
+  },
+  {
+    "id": "B_017",
+    "type": "out_of_domain",
+    "query": "我要设计一款 90.0 度视场、F/1.4、口径 12.0mm 的镜头",
+    "constraints": {
+      "fov": 90.0,
+      "fnum": 1.4,
+      "aper": 12.0
+    },
+    "ground_truth": {
+      "lens_idx": 101136,
+      "fov": 59.0,
+      "fnum": 4.6,
+      "aper": 6.0,
+      "calc_rms": 0.01593370741709167,
+      "calc_effl": 17.066202852791562,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 121
+  },
+  {
+    "id": "E_036",
+    "type": "partial",
+    "query": "帮我设计一个 F/1.7 的镜头方案",
+    "constraints": {
+      "fnum": 1.7
+    },
+    "ground_truth": {
+      "lens_idx": 75523,
+      "fov": 15.0,
+      "fnum": 1.7,
+      "aper": 2.0,
+      "calc_rms": 0.00046805804849056777,
+      "calc_effl": 80.44244831839251,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": false,
+      "has_fnum": true,
+      "has_aper": false,
+      "tol_fov": 999,
+      "tol_fnum": 0.3,
+      "tol_aper": 999
+    },
+    "global_id": 122
+  },
+  {
+    "id": "C_008",
+    "type": "specific",
+    "query": "请帮我设计 FOV=41.0度 F/2.0 口径 12.0mm 的镜头方案，RMS 小于 0.340mm",
+    "constraints": {
+      "fov": 41.0,
+      "fnum": 2.0,
+      "aper": 12.0,
+      "rms_target": 0.34
+    },
+    "ground_truth": {
+      "lens_idx": 123381,
+      "fov": 41.0,
+      "fnum": 2.0,
+      "aper": 12.0,
+      "calc_rms": 0.09933222327145062,
+      "calc_effl": 28.944922755650893,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.34
+    },
+    "global_id": 123
+  },
+  {
+    "id": "B_009",
+    "type": "out_of_domain",
+    "query": "请帮我设计 FOV=70.0度 F/8.0 口径 2.0mm 的镜头方案",
+    "constraints": {
+      "fov": 70.0,
+      "fnum": 8.0,
+      "aper": 2.0
+    },
+    "ground_truth": {
+      "lens_idx": 115449,
+      "fov": 59.0,
+      "fnum": 5.6,
+      "aper": 4.0,
+      "calc_rms": 0.011363838543294709,
+      "calc_effl": 16.195846265893078,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 124
+  },
+  {
+    "id": "B_027",
+    "type": "out_of_domain",
+    "query": "帮我设计一个 FOV=3.0度、F/6.5、口径 8.0mm 的镜头",
+    "constraints": {
+      "fov": 3.0,
+      "fnum": 6.5,
+      "aper": 8.0
+    },
+    "ground_truth": {
+      "lens_idx": 149,
+      "fov": 4.0,
+      "fnum": 5.5,
+      "aper": 2.0,
+      "calc_rms": 0.0021578328210062714,
+      "calc_effl": 247.9501136954521,
+      "source": "read_data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 125
+  },
+  {
+    "id": "D_020",
+    "type": "range",
+    "query": "帮我设计视场角 21.0~31.0 度、光圈 F/3.0~F/4.0 的镜头，RMS 越小越好",
+    "constraints": {
+      "fov_min": 21.0,
+      "fov_max": 31.0,
+      "fnum_min": 3.0,
+      "fnum_max": 4.0
+    },
+    "ground_truth": {
+      "lens_idx": 70908,
+      "fov": 30.0,
+      "fnum": 3.6,
+      "aper": 6.0,
+      "calc_rms": 6.195653611325026e-05,
+      "calc_effl": 37.793438438812416,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        21.0,
+        31.0
+      ],
+      "fnum_range": [
+        3.0,
+        4.0
+      ],
+      "tol_fov": 10.0,
+      "tol_fnum": 1.0,
+      "tol_aper": 999
+    },
+    "global_id": 126
+  },
+  {
+    "id": "B_018",
+    "type": "out_of_domain",
+    "query": "设计一个 FOV=100.0 度、F 数为 12.0、通光口径 2.0mm 的光学系统",
+    "constraints": {
+      "fov": 100.0,
+      "fnum": 12.0,
+      "aper": 2.0
+    },
+    "ground_truth": {
+      "lens_idx": 115449,
+      "fov": 59.0,
+      "fnum": 5.6,
+      "aper": 4.0,
+      "calc_rms": 0.011363838543294709,
+      "calc_effl": 16.195846265893078,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 127
+  },
+  {
+    "id": "D_027",
+    "type": "range",
+    "query": "我需要一款 FOV 在 10.0 到 30.0 度、F 数 1.6-2.1 的镜头方案",
+    "constraints": {
+      "fov_min": 10.0,
+      "fov_max": 30.0,
+      "fnum_min": 1.6,
+      "fnum_max": 2.1
+    },
+    "ground_truth": {
+      "lens_idx": 131215,
+      "fov": 16.0,
+      "fnum": 2.0,
+      "aper": 6.0,
+      "calc_rms": 5.627423109064902e-05,
+      "calc_effl": 81.33428088272686,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        10.0,
+        30.0
+      ],
+      "fnum_range": [
+        1.6,
+        2.1
+      ],
+      "tol_fov": 20.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 999
+    },
+    "global_id": 128
+  },
+  {
+    "id": "E_022",
+    "type": "partial",
+    "query": "帮我设计 FOV=28.0度、F/3.7 的镜头",
+    "constraints": {
+      "fov": 28.0,
+      "fnum": 3.7
+    },
+    "ground_truth": {
+      "lens_idx": 125083,
+      "fov": 28.0,
+      "fnum": 3.2,
+      "aper": 6.0,
+      "calc_rms": 0.0026852204549596224,
+      "calc_effl": 47.88548526577528,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "tol_fov": 2.0,
+      "tol_fnum": 0.3,
+      "tol_aper": 999
+    },
+    "global_id": 129
+  },
+  {
+    "id": "B_024",
+    "type": "out_of_domain",
+    "query": "帮我设计一个 FOV=2.0度、F/6.2、口径 4.0mm 的镜头",
+    "constraints": {
+      "fov": 2.0,
+      "fnum": 6.2,
+      "aper": 4.0
+    },
+    "ground_truth": {
+      "lens_idx": 149,
+      "fov": 4.0,
+      "fnum": 5.5,
+      "aper": 2.0,
+      "calc_rms": 0.0021578328210062714,
+      "calc_effl": 247.9501136954521,
+      "source": "read_data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 130
+  },
+  {
+    "id": "A_022",
+    "type": "in_domain",
+    "query": "帮我设计一个 FOV=21.0度、F/2.7、口径 10.0mm 的镜头",
+    "constraints": {
+      "fov": 21.0,
+      "fnum": 2.7,
+      "aper": 10.0
+    },
+    "ground_truth": {
+      "lens_idx": 60827,
+      "fov": 21.0,
+      "fnum": 2.7,
+      "aper": 10.0,
+      "calc_rms": 0.002154855325064638,
+      "calc_effl": 59.683548810729,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 131
+  },
+  {
+    "id": "E_004",
+    "type": "partial",
+    "query": "我需要设计一款 FOV=45.0 度的光学系统，成像质量尽量好",
+    "constraints": {
+      "fov": 45.0
+    },
+    "ground_truth": {
+      "lens_idx": 155877,
+      "fov": 45.0,
+      "fnum": 3.5,
+      "aper": 6.0,
+      "calc_rms": 6.954236572622308e-05,
+      "calc_effl": 21.413032438556762,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": false,
+      "has_aper": false,
+      "tol_fov": 1.5,
+      "tol_fnum": 999,
+      "tol_aper": 999
+    },
+    "global_id": 132
+  },
+  {
+    "id": "E_013",
+    "type": "partial",
+    "query": "设计一个 F 数为 3.3 的光学系统",
+    "constraints": {
+      "fnum": 3.3
+    },
+    "ground_truth": {
+      "lens_idx": 56491,
+      "fov": 12.0,
+      "fnum": 3.3,
+      "aper": 6.0,
+      "calc_rms": 0.0018170540469816183,
+      "calc_effl": 121.06036138323118,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": false,
+      "has_fnum": true,
+      "has_aper": false,
+      "tol_fov": 999,
+      "tol_fnum": 0.3,
+      "tol_aper": 999
+    },
+    "global_id": 133
+  },
+  {
+    "id": "A_039",
+    "type": "in_domain",
+    "query": "我要设计一款 22.0 度视场、F/2.0、口径 2.0mm 的镜头",
+    "constraints": {
+      "fov": 22.0,
+      "fnum": 2.0,
+      "aper": 2.0
+    },
+    "ground_truth": {
+      "lens_idx": 77120,
+      "fov": 22.0,
+      "fnum": 2.0,
+      "aper": 2.0,
+      "calc_rms": 0.002786506208318831,
+      "calc_effl": 58.3646606555343,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 134
+  },
+  {
+    "id": "C_024",
+    "type": "specific",
+    "query": "我要设计一款 40.0 度视场、F/3.3、口径 8.0mm 的镜头，RMS 小于 0.628mm",
+    "constraints": {
+      "fov": 40.0,
+      "fnum": 3.3,
+      "aper": 8.0,
+      "rms_target": 0.628
+    },
+    "ground_truth": {
+      "lens_idx": 48106,
+      "fov": 40.0,
+      "fnum": 3.3,
+      "aper": 6.0,
+      "calc_rms": 0.06394331254968037,
+      "calc_effl": 27.143405828985674,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.628
+    },
+    "global_id": 135
+  },
+  {
+    "id": "A_019",
+    "type": "in_domain",
+    "query": "帮我设计一个 FOV=23.0度、F/2.7、口径 4.0mm 的镜头",
+    "constraints": {
+      "fov": 23.0,
+      "fnum": 2.7,
+      "aper": 4.0
+    },
+    "ground_truth": {
+      "lens_idx": 128157,
+      "fov": 23.0,
+      "fnum": 2.7,
+      "aper": 4.0,
+      "calc_rms": 0.006461891868698755,
+      "calc_effl": 60.02609001892855,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 136
+  },
+  {
+    "id": "C_034",
+    "type": "specific",
+    "query": "帮我设计一个 FOV=43.0度、F/1.9、口径 4.0mm 的镜头，RMS 小于 0.052mm",
+    "constraints": {
+      "fov": 43.0,
+      "fnum": 1.9,
+      "aper": 4.0,
+      "rms_target": 0.052
+    },
+    "ground_truth": {
+      "lens_idx": 105276,
+      "fov": 43.0,
+      "fnum": 1.9,
+      "aper": 2.0,
+      "calc_rms": 0.023377437675552788,
+      "calc_effl": 33.03806512396634,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.052
+    },
+    "global_id": 137
+  },
+  {
+    "id": "D_023",
+    "type": "range",
+    "query": "帮我设计视场角 40.0~54.0 度、光圈 F/4.7~F/5.3 的镜头，RMS 越小越好",
+    "constraints": {
+      "fov_min": 40.0,
+      "fov_max": 54.0,
+      "fnum_min": 4.7,
+      "fnum_max": 5.3
+    },
+    "ground_truth": {
+      "lens_idx": 139721,
+      "fov": 51.0,
+      "fnum": 4.8,
+      "aper": 8.0,
+      "calc_rms": 0.00017703526225292017,
+      "calc_effl": 19.93130164225291,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        40.0,
+        54.0
+      ],
+      "fnum_range": [
+        4.7,
+        5.3
+      ],
+      "tol_fov": 14.0,
+      "tol_fnum": 0.5999999999999996,
+      "tol_aper": 999
+    },
+    "global_id": 138
+  },
+  {
+    "id": "A_017",
+    "type": "in_domain",
+    "query": "帮我设计一个 FOV=17.0度、F/5.6、口径 0.0mm 的镜头",
+    "constraints": {
+      "fov": 17.0,
+      "fnum": 5.6,
+      "aper": 0.0
+    },
+    "ground_truth": {
+      "lens_idx": 54877,
+      "fov": 17.0,
+      "fnum": 5.6,
+      "aper": 0.0,
+      "calc_rms": 0.07321730197895063,
+      "calc_effl": 81.51469651085543,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 139
+  },
+  {
+    "id": "A_030",
+    "type": "in_domain",
+    "query": "帮我设计一个 FOV=46.0度、F/3.5、口径 2.0mm 的镜头",
+    "constraints": {
+      "fov": 46.0,
+      "fnum": 3.5,
+      "aper": 2.0
+    },
+    "ground_truth": {
+      "lens_idx": 104894,
+      "fov": 46.0,
+      "fnum": 3.5,
+      "aper": 2.0,
+      "calc_rms": 0.00015573212012411826,
+      "calc_effl": 25.190561263496367,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 140
+  },
+  {
+    "id": "C_028",
+    "type": "specific",
+    "query": "请帮我设计 FOV=47.0度 F/2.6 口径 6.0mm 的镜头方案，RMS 小于 0.154mm",
+    "constraints": {
+      "fov": 47.0,
+      "fnum": 2.6,
+      "aper": 6.0,
+      "rms_target": 0.154
+    },
+    "ground_truth": {
+      "lens_idx": 47623,
+      "fov": 47.0,
+      "fnum": 2.6,
+      "aper": 0.0,
+      "calc_rms": 0.008719808162014448,
+      "calc_effl": 25.757864583020048,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.154
+    },
+    "global_id": 141
+  },
+  {
+    "id": "E_028",
+    "type": "partial",
+    "query": "帮我设计一个入瞳口径 10.0mm 的镜头",
+    "constraints": {
+      "aper": 10.0
+    },
+    "ground_truth": {
+      "lens_idx": 23737,
+      "fov": 5.0,
+      "fnum": 3.9,
+      "aper": 10.0,
+      "calc_rms": 0.00010921111961934475,
+      "calc_effl": 247.7679634417638,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": false,
+      "has_fnum": false,
+      "has_aper": true,
+      "tol_fov": 999,
+      "tol_fnum": 999,
+      "tol_aper": 1.5
+    },
+    "global_id": 142
+  },
+  {
+    "id": "C_038",
+    "type": "specific",
+    "query": "帮我设计一个 FOV=45.0度、F/5.4、口径 6.0mm 的镜头，RMS 小于 0.169mm",
+    "constraints": {
+      "fov": 45.0,
+      "fnum": 5.4,
+      "aper": 6.0,
+      "rms_target": 0.169
+    },
+    "ground_truth": {
+      "lens_idx": 101217,
+      "fov": 45.0,
+      "fnum": 5.4,
+      "aper": 8.0,
+      "calc_rms": 0.01975780663299569,
+      "calc_effl": 22.03901168351639,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.169
+    },
+    "global_id": 143
+  },
+  {
+    "id": "E_019",
+    "type": "partial",
+    "query": "我需要视场 57.0°、光圈 F/2.1 的镜头方案，口径不限",
+    "constraints": {
+      "fov": 57.0,
+      "fnum": 2.1
+    },
+    "ground_truth": {
+      "lens_idx": 82337,
+      "fov": 57.0,
+      "fnum": 2.6,
+      "aper": 8.0,
+      "calc_rms": 0.04752851781104451,
+      "calc_effl": 16.814086512541902,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "tol_fov": 2.0,
+      "tol_fnum": 0.3,
+      "tol_aper": 999
+    },
+    "global_id": 144
+  },
+  {
+    "id": "D_008",
+    "type": "range",
+    "query": "帮我设计视场角 29.0~43.0 度、光圈 F/4.4~F/5.0 的镜头，RMS 越小越好",
+    "constraints": {
+      "fov_min": 29.0,
+      "fov_max": 43.0,
+      "fnum_min": 4.4,
+      "fnum_max": 5.0
+    },
+    "ground_truth": {
+      "lens_idx": 21167,
+      "fov": 40.0,
+      "fnum": 4.7,
+      "aper": 2.0,
+      "calc_rms": 0.00020610320021040591,
+      "calc_effl": 27.04714637477817,
+      "source": "read_data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        29.0,
+        43.0
+      ],
+      "fnum_range": [
+        4.4,
+        5.0
+      ],
+      "tol_fov": 14.0,
+      "tol_fnum": 0.5999999999999996,
+      "tol_aper": 999
+    },
+    "global_id": 145
+  },
+  {
+    "id": "D_033",
+    "type": "range",
+    "query": "视场 10.0~24.0 度 光圈 F/3.3~F/5.3 推荐 RMS 最小的方案",
+    "constraints": {
+      "fov_min": 10.0,
+      "fov_max": 24.0,
+      "fnum_min": 3.3,
+      "fnum_max": 5.3
+    },
+    "ground_truth": {
+      "lens_idx": 139119,
+      "fov": 14.0,
+      "fnum": 4.0,
+      "aper": 2.0,
+      "calc_rms": 1.4020967432909244e-05,
+      "calc_effl": 122.22436761939872,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        10.0,
+        24.0
+      ],
+      "fnum_range": [
+        3.3,
+        5.3
+      ],
+      "tol_fov": 14.0,
+      "tol_fnum": 2.0,
+      "tol_aper": 999
+    },
+    "global_id": 146
+  },
+  {
+    "id": "C_003",
+    "type": "specific",
+    "query": "请帮我设计 FOV=15.0度 F/1.9 口径 2.0mm 的镜头方案，RMS 小于 0.015mm",
+    "constraints": {
+      "fov": 15.0,
+      "fnum": 1.9,
+      "aper": 2.0,
+      "rms_target": 0.015
+    },
+    "ground_truth": {
+      "lens_idx": 32334,
+      "fov": 15.0,
+      "fnum": 1.9,
+      "aper": 2.0,
+      "calc_rms": 0.0008441170941119798,
+      "calc_effl": 80.38026765491695,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.015
+    },
+    "global_id": 147
+  },
+  {
+    "id": "C_001",
+    "type": "specific",
+    "query": "我要设计一款 30.0 度视场、F/3.5、口径 4.0mm 的镜头，RMS 小于 0.135mm",
+    "constraints": {
+      "fov": 30.0,
+      "fnum": 3.5,
+      "aper": 4.0,
+      "rms_target": 0.135
+    },
+    "ground_truth": {
+      "lens_idx": 14585,
+      "fov": 30.0,
+      "fnum": 3.5,
+      "aper": 4.0,
+      "calc_rms": 0.006209317252837686,
+      "calc_effl": 38.473900583298025,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.135
+    },
+    "global_id": 148
+  },
+  {
+    "id": "E_011",
+    "type": "partial",
+    "query": "设计一个 F 数为 2.7 的光学系统",
+    "constraints": {
+      "fnum": 2.7
+    },
+    "ground_truth": {
+      "lens_idx": 80590,
+      "fov": 33.0,
+      "fnum": 2.7,
+      "aper": 0.0,
+      "calc_rms": 0.0002391784277259427,
+      "calc_effl": 39.58944433708133,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": false,
+      "has_fnum": true,
+      "has_aper": false,
+      "tol_fov": 999,
+      "tol_fnum": 0.3,
+      "tol_aper": 999
+    },
+    "global_id": 149
+  },
+  {
+    "id": "C_027",
+    "type": "specific",
+    "query": "帮我设计一个 FOV=27.0度、F/4.2、口径 8.0mm 的镜头，RMS 小于 0.198mm",
+    "constraints": {
+      "fov": 27.0,
+      "fnum": 4.2,
+      "aper": 8.0,
+      "rms_target": 0.198
+    },
+    "ground_truth": {
+      "lens_idx": 148398,
+      "fov": 27.0,
+      "fnum": 4.2,
+      "aper": 6.0,
+      "calc_rms": 0.005922505403585633,
+      "calc_effl": 46.49473053896331,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.198
+    },
+    "global_id": 150
+  },
+  {
+    "id": "E_003",
+    "type": "partial",
+    "query": "设计一个 F 数为 2.0 的光学系统",
+    "constraints": {
+      "fnum": 2.0
+    },
+    "ground_truth": {
+      "lens_idx": 131215,
+      "fov": 16.0,
+      "fnum": 2.0,
+      "aper": 6.0,
+      "calc_rms": 5.627423109064902e-05,
+      "calc_effl": 81.33428088272686,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": false,
+      "has_fnum": true,
+      "has_aper": false,
+      "tol_fov": 999,
+      "tol_fnum": 0.3,
+      "tol_aper": 999
+    },
+    "global_id": 151
+  },
+  {
+    "id": "A_027",
+    "type": "in_domain",
+    "query": "设计一个 FOV=16.0 度、F 数为 3.0、通光口径 4.0mm 的光学系统",
+    "constraints": {
+      "fov": 16.0,
+      "fnum": 3.0,
+      "aper": 4.0
+    },
+    "ground_truth": {
+      "lens_idx": 122918,
+      "fov": 16.0,
+      "fnum": 3.0,
+      "aper": 4.0,
+      "calc_rms": 0.0012591672112747408,
+      "calc_effl": 81.04876537476781,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 152
+  },
+  {
+    "id": "C_006",
+    "type": "specific",
+    "query": "我要设计一款 48.0 度视场、F/4.7、口径 10.0mm 的镜头，RMS 小于 0.156mm",
+    "constraints": {
+      "fov": 48.0,
+      "fnum": 4.7,
+      "aper": 10.0,
+      "rms_target": 0.156
+    },
+    "ground_truth": {
+      "lens_idx": 148918,
+      "fov": 48.0,
+      "fnum": 4.7,
+      "aper": 0.0,
+      "calc_rms": 0.02588091941738458,
+      "calc_effl": 25.725099757379187,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.156
+    },
+    "global_id": 153
+  },
+  {
+    "id": "E_001",
+    "type": "partial",
+    "query": "我需要视场 26.0°、光圈 F/5.0 的镜头方案，口径不限",
+    "constraints": {
+      "fov": 26.0,
+      "fnum": 5.0
+    },
+    "ground_truth": {
+      "lens_idx": 76028,
+      "fov": 26.0,
+      "fnum": 5.0,
+      "aper": 2.0,
+      "calc_rms": 0.0032322789213715076,
+      "calc_effl": 47.45498473608086,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "tol_fov": 2.0,
+      "tol_fnum": 0.3,
+      "tol_aper": 999
+    },
+    "global_id": 154
+  },
+  {
+    "id": "B_035",
+    "type": "out_of_domain",
+    "query": "设计一个 FOV=65.0 度、F 数为 1.4、通光口径 4.0mm 的光学系统",
+    "constraints": {
+      "fov": 65.0,
+      "fnum": 1.4,
+      "aper": 4.0
+    },
+    "ground_truth": {
+      "lens_idx": 101136,
+      "fov": 59.0,
+      "fnum": 4.6,
+      "aper": 6.0,
+      "calc_rms": 0.01593370741709167,
+      "calc_effl": 17.066202852791562,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 155
+  },
+  {
+    "id": "E_040",
+    "type": "partial",
+    "query": "我需要一款光圈 F/3.9 的镜头，RMS 越小越好",
+    "constraints": {
+      "fnum": 3.9
+    },
+    "ground_truth": {
+      "lens_idx": 71784,
+      "fov": 12.0,
+      "fnum": 3.9,
+      "aper": 2.0,
+      "calc_rms": 7.635704431679378e-05,
+      "calc_effl": 122.64244985040774,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": false,
+      "has_fnum": true,
+      "has_aper": false,
+      "tol_fov": 999,
+      "tol_fnum": 0.3,
+      "tol_aper": 999
+    },
+    "global_id": 156
+  },
+  {
+    "id": "A_014",
+    "type": "in_domain",
+    "query": "我要设计一款 21.0 度视场、F/5.2、口径 8.0mm 的镜头",
+    "constraints": {
+      "fov": 21.0,
+      "fnum": 5.2,
+      "aper": 8.0
+    },
+    "ground_truth": {
+      "lens_idx": 59540,
+      "fov": 21.0,
+      "fnum": 5.2,
+      "aper": 8.0,
+      "calc_rms": 0.0016254158106794837,
+      "calc_effl": 59.995958816983425,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 157
+  },
+  {
+    "id": "A_012",
+    "type": "in_domain",
+    "query": "我需要设计一款视场角 35.0°、光圈 F/5.8、入瞳口径 0.0mm 的镜头",
+    "constraints": {
+      "fov": 35.0,
+      "fnum": 5.8,
+      "aper": 0.0
+    },
+    "ground_truth": {
+      "lens_idx": 76841,
+      "fov": 35.0,
+      "fnum": 5.8,
+      "aper": 0.0,
+      "calc_rms": 0.04173844914634884,
+      "calc_effl": 31.240358750284226,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 158
+  },
+  {
+    "id": "E_015",
+    "type": "partial",
+    "query": "设计一款通光口径 8.0mm 的光学系统，成像质量尽量好",
+    "constraints": {
+      "aper": 8.0
+    },
+    "ground_truth": {
+      "lens_idx": 1107,
+      "fov": 25.0,
+      "fnum": 2.8,
+      "aper": 8.0,
+      "calc_rms": 1.5641868884774207e-05,
+      "calc_effl": 46.997020182607464,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": false,
+      "has_fnum": false,
+      "has_aper": true,
+      "tol_fov": 999,
+      "tol_fnum": 999,
+      "tol_aper": 1.5
+    },
+    "global_id": 159
+  },
+  {
+    "id": "A_033",
+    "type": "in_domain",
+    "query": "我要设计一款 25.0 度视场、F/3.3、口径 12.0mm 的镜头",
+    "constraints": {
+      "fov": 25.0,
+      "fnum": 3.3,
+      "aper": 12.0
+    },
+    "ground_truth": {
+      "lens_idx": 7665,
+      "fov": 25.0,
+      "fnum": 3.3,
+      "aper": 12.0,
+      "calc_rms": 0.02159832486017868,
+      "calc_effl": 47.43623678817723,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 160
+  },
+  {
+    "id": "C_017",
+    "type": "specific",
+    "query": "请帮我设计 FOV=36.0度 F/5.9 口径 2.0mm 的镜头方案，RMS 小于 0.020mm",
+    "constraints": {
+      "fov": 36.0,
+      "fnum": 5.9,
+      "aper": 2.0,
+      "rms_target": 0.02
+    },
+    "ground_truth": {
+      "lens_idx": 13989,
+      "fov": 36.0,
+      "fnum": 5.9,
+      "aper": 2.0,
+      "calc_rms": 0.0005049030571413515,
+      "calc_effl": 30.882133035087836,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.02
+    },
+    "global_id": 161
+  },
+  {
+    "id": "A_004",
+    "type": "in_domain",
+    "query": "帮我设计一个 FOV=21.0度、F/3.5、口径 0.0mm 的镜头",
+    "constraints": {
+      "fov": 21.0,
+      "fnum": 3.5,
+      "aper": 0.0
+    },
+    "ground_truth": {
+      "lens_idx": 93110,
+      "fov": 21.0,
+      "fnum": 3.5,
+      "aper": 0.0,
+      "calc_rms": 0.12411651800571306,
+      "calc_effl": 60.80183154047906,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 162
+  },
+  {
+    "id": "B_038",
+    "type": "out_of_domain",
+    "query": "设计一个 FOV=35.0 度、F 数为 6.5、通光口径 12.0mm 的光学系统",
+    "constraints": {
+      "fov": 35.0,
+      "fnum": 6.5,
+      "aper": 12.0
+    },
+    "ground_truth": {
+      "lens_idx": 72148,
+      "fov": 35.0,
+      "fnum": 6.0,
+      "aper": 2.0,
+      "calc_rms": 0.0009036172782939078,
+      "calc_effl": 30.922467566887168,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 163
+  },
+  {
+    "id": "B_006",
+    "type": "out_of_domain",
+    "query": "我需要设计一款视场角 20.0°、光圈 F/1.5、入瞳口径 8.0mm 的镜头",
+    "constraints": {
+      "fov": 20.0,
+      "fnum": 1.5,
+      "aper": 8.0
+    },
+    "ground_truth": {
+      "lens_idx": 14161,
+      "fov": 20.0,
+      "fnum": 1.8,
+      "aper": 2.0,
+      "calc_rms": 0.00221193306561323,
+      "calc_effl": 58.3667669949242,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 164
+  },
+  {
+    "id": "D_013",
+    "type": "range",
+    "query": "设计一个视场 28.0°~34.0°、光圈 F/1.6~3.2 的光学系统",
+    "constraints": {
+      "fov_min": 28.0,
+      "fov_max": 34.0,
+      "fnum_min": 1.6,
+      "fnum_max": 3.2
+    },
+    "ground_truth": {
+      "lens_idx": 132934,
+      "fov": 31.0,
+      "fnum": 2.6,
+      "aper": 4.0,
+      "calc_rms": 6.651556550207683e-05,
+      "calc_effl": 38.21841458571338,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        28.0,
+        34.0
+      ],
+      "fnum_range": [
+        1.6,
+        3.2
+      ],
+      "tol_fov": 6.0,
+      "tol_fnum": 1.6,
+      "tol_aper": 999
+    },
+    "global_id": 165
+  },
+  {
+    "id": "B_019",
+    "type": "out_of_domain",
+    "query": "帮我设计一个 FOV=100.0度、F/7.0、口径 2.0mm 的镜头",
+    "constraints": {
+      "fov": 100.0,
+      "fnum": 7.0,
+      "aper": 2.0
+    },
+    "ground_truth": {
+      "lens_idx": 115449,
+      "fov": 59.0,
+      "fnum": 5.6,
+      "aper": 4.0,
+      "calc_rms": 0.011363838543294709,
+      "calc_effl": 16.195846265893078,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 166
+  },
+  {
+    "id": "B_036",
+    "type": "out_of_domain",
+    "query": "设计一个 FOV=75.0 度、F 数为 6.5、通光口径 4.0mm 的光学系统",
+    "constraints": {
+      "fov": 75.0,
+      "fnum": 6.5,
+      "aper": 4.0
+    },
+    "ground_truth": {
+      "lens_idx": 115449,
+      "fov": 59.0,
+      "fnum": 5.6,
+      "aper": 4.0,
+      "calc_rms": 0.011363838543294709,
+      "calc_effl": 16.195846265893078,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 167
+  },
+  {
+    "id": "E_018",
+    "type": "partial",
+    "query": "帮我设计一个视场角 24.0° 的镜头方案",
+    "constraints": {
+      "fov": 24.0
+    },
+    "ground_truth": {
+      "lens_idx": 133074,
+      "fov": 24.0,
+      "fnum": 4.1,
+      "aper": 6.0,
+      "calc_rms": 6.231032431828557e-05,
+      "calc_effl": 59.93248794828225,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": false,
+      "has_aper": false,
+      "tol_fov": 1.5,
+      "tol_fnum": 999,
+      "tol_aper": 999
+    },
+    "global_id": 168
+  },
+  {
+    "id": "A_026",
+    "type": "in_domain",
+    "query": "我需要设计一款视场角 49.0°、光圈 F/4.7、入瞳口径 0.0mm 的镜头",
+    "constraints": {
+      "fov": 49.0,
+      "fnum": 4.7,
+      "aper": 0.0
+    },
+    "ground_truth": {
+      "lens_idx": 63865,
+      "fov": 49.0,
+      "fnum": 4.7,
+      "aper": 0.0,
+      "calc_rms": 0.02709960921038886,
+      "calc_effl": 25.906673832178544,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 169
+  },
+  {
+    "id": "B_033",
+    "type": "out_of_domain",
+    "query": "我要设计一款 62.0 度视场、F/1.4、口径 10.0mm 的镜头",
+    "constraints": {
+      "fov": 62.0,
+      "fnum": 1.4,
+      "aper": 10.0
+    },
+    "ground_truth": {
+      "lens_idx": 63127,
+      "fov": 58.0,
+      "fnum": 2.7,
+      "aper": 8.0,
+      "calc_rms": 0.04391591965474608,
+      "calc_effl": 16.74588983867618,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 170
+  },
+  {
+    "id": "C_033",
+    "type": "specific",
+    "query": "我需要设计一款视场角 58.0°、光圈 F/4.3、入瞳口径 8.0mm 的镜头，RMS 小于 0.401mm",
+    "constraints": {
+      "fov": 58.0,
+      "fnum": 4.3,
+      "aper": 8.0,
+      "rms_target": 0.401
+    },
+    "ground_truth": {
+      "lens_idx": 148655,
+      "fov": 58.0,
+      "fnum": 4.3,
+      "aper": 8.0,
+      "calc_rms": 0.026309034339099556,
+      "calc_effl": 16.22084453237294,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.401
+    },
+    "global_id": 171
+  },
+  {
+    "id": "C_015",
+    "type": "specific",
+    "query": "我需要设计一款视场角 36.0°、光圈 F/6.0、入瞳口径 4.0mm 的镜头，RMS 小于 0.203mm",
+    "constraints": {
+      "fov": 36.0,
+      "fnum": 6.0,
+      "aper": 4.0,
+      "rms_target": 0.203
+    },
+    "ground_truth": {
+      "lens_idx": 2829,
+      "fov": 36.0,
+      "fnum": 6.0,
+      "aper": 4.0,
+      "calc_rms": 0.007462749691347188,
+      "calc_effl": 31.383858031674073,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.203
+    },
+    "global_id": 172
+  },
+  {
+    "id": "C_031",
+    "type": "specific",
+    "query": "我要设计一款 44.0 度视场、F/2.0、口径 10.0mm 的镜头，RMS 小于 0.061mm",
+    "constraints": {
+      "fov": 44.0,
+      "fnum": 2.0,
+      "aper": 10.0,
+      "rms_target": 0.061
+    },
+    "ground_truth": {
+      "lens_idx": 98637,
+      "fov": 44.0,
+      "fnum": 2.0,
+      "aper": 4.0,
+      "calc_rms": 0.004648528059907838,
+      "calc_effl": 28.574377380216436,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.061
+    },
+    "global_id": 173
+  },
+  {
+    "id": "B_031",
+    "type": "out_of_domain",
+    "query": "请帮我设计 FOV=12.0度 F/6.5 口径 2.0mm 的镜头方案",
+    "constraints": {
+      "fov": 12.0,
+      "fnum": 6.5,
+      "aper": 2.0
+    },
+    "ground_truth": {
+      "lens_idx": 132980,
+      "fov": 12.0,
+      "fnum": 6.0,
+      "aper": 8.0,
+      "calc_rms": 6.111229812202862e-05,
+      "calc_effl": 123.49340440320371,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 174
+  },
+  {
+    "id": "C_004",
+    "type": "specific",
+    "query": "我要设计一款 12.0 度视场、F/2.8、口径 8.0mm 的镜头，RMS 小于 0.147mm",
+    "constraints": {
+      "fov": 12.0,
+      "fnum": 2.8,
+      "aper": 8.0,
+      "rms_target": 0.147
+    },
+    "ground_truth": {
+      "lens_idx": 96709,
+      "fov": 12.0,
+      "fnum": 2.8,
+      "aper": 8.0,
+      "calc_rms": 6.040195774505915e-05,
+      "calc_effl": 121.95377645564804,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.147
+    },
+    "global_id": 175
+  },
+  {
+    "id": "B_016",
+    "type": "out_of_domain",
+    "query": "我要设计一款 5.0 度视场、F/1.0、口径 2.0mm 的镜头",
+    "constraints": {
+      "fov": 5.0,
+      "fnum": 1.0,
+      "aper": 2.0
+    },
+    "ground_truth": {
+      "lens_idx": 95271,
+      "fov": 5.0,
+      "fnum": 1.6,
+      "aper": 0.0,
+      "calc_rms": 0.1779025984390148,
+      "calc_effl": 246.93903365780966,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 176
+  },
+  {
+    "id": "E_024",
+    "type": "partial",
+    "query": "帮我设计一个 F/4.7 的镜头方案",
+    "constraints": {
+      "fnum": 4.7
+    },
+    "ground_truth": {
+      "lens_idx": 59289,
+      "fov": 22.0,
+      "fnum": 4.7,
+      "aper": 6.0,
+      "calc_rms": 0.00018131880227437847,
+      "calc_effl": 59.20675370493598,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": false,
+      "has_fnum": true,
+      "has_aper": false,
+      "tol_fov": 999,
+      "tol_fnum": 0.3,
+      "tol_aper": 999
+    },
+    "global_id": 177
+  },
+  {
+    "id": "B_008",
+    "type": "out_of_domain",
+    "query": "请帮我设计 FOV=8.0度 F/1.0 口径 4.0mm 的镜头方案",
+    "constraints": {
+      "fov": 8.0,
+      "fnum": 1.0,
+      "aper": 4.0
+    },
+    "ground_truth": {
+      "lens_idx": 126757,
+      "fov": 8.0,
+      "fnum": 1.6,
+      "aper": 0.0,
+      "calc_rms": 0.16105568811064802,
+      "calc_effl": 243.7696467745755,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 178
+  },
+  {
+    "id": "E_017",
+    "type": "partial",
+    "query": "我需要设计一款 FOV=41.0 度的光学系统，成像质量尽量好",
+    "constraints": {
+      "fov": 41.0
+    },
+    "ground_truth": {
+      "lens_idx": 20491,
+      "fov": 41.0,
+      "fnum": 6.0,
+      "aper": 6.0,
+      "calc_rms": 4.1880165352186606e-05,
+      "calc_effl": 25.533802663822847,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": false,
+      "has_aper": false,
+      "tol_fov": 1.5,
+      "tol_fnum": 999,
+      "tol_aper": 999
+    },
+    "global_id": 179
+  },
+  {
+    "id": "C_018",
+    "type": "specific",
+    "query": "我要设计一款 21.0 度视场、F/4.7、口径 6.0mm 的镜头，RMS 小于 0.141mm",
+    "constraints": {
+      "fov": 21.0,
+      "fnum": 4.7,
+      "aper": 6.0,
+      "rms_target": 0.141
+    },
+    "ground_truth": {
+      "lens_idx": 51909,
+      "fov": 21.0,
+      "fnum": 4.7,
+      "aper": 6.0,
+      "calc_rms": 0.0005057389327222428,
+      "calc_effl": 59.18606785138561,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.141
+    },
+    "global_id": 180
+  },
+  {
+    "id": "E_026",
+    "type": "partial",
+    "query": "设计一个 21.0 度视场的镜头，RMS 越小越好",
+    "constraints": {
+      "fov": 21.0
+    },
+    "ground_truth": {
+      "lens_idx": 32402,
+      "fov": 21.0,
+      "fnum": 6.0,
+      "aper": 2.0,
+      "calc_rms": 2.878334817462704e-05,
+      "calc_effl": 60.00309748792613,
+      "source": "read_data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": false,
+      "has_aper": false,
+      "tol_fov": 1.5,
+      "tol_fnum": 999,
+      "tol_aper": 999
+    },
+    "global_id": 181
+  },
+  {
+    "id": "D_001",
+    "type": "range",
+    "query": "我需要一款 FOV 在 30.0 到 36.0 度、F 数 5.2-5.8 的镜头方案",
+    "constraints": {
+      "fov_min": 30.0,
+      "fov_max": 36.0,
+      "fnum_min": 5.2,
+      "fnum_max": 5.8
+    },
+    "ground_truth": {
+      "lens_idx": 47280,
+      "fov": 31.0,
+      "fnum": 5.2,
+      "aper": 2.0,
+      "calc_rms": 8.196221673641754e-05,
+      "calc_effl": 37.89222721813881,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        30.0,
+        36.0
+      ],
+      "fnum_range": [
+        5.2,
+        5.8
+      ],
+      "tol_fov": 6.0,
+      "tol_fnum": 0.5999999999999996,
+      "tol_aper": 999
+    },
+    "global_id": 182
+  },
+  {
+    "id": "B_010",
+    "type": "out_of_domain",
+    "query": "请帮我设计 FOV=55.0度 F/1.5 口径 6.0mm 的镜头方案",
+    "constraints": {
+      "fov": 55.0,
+      "fnum": 1.5,
+      "aper": 6.0
+    },
+    "ground_truth": {
+      "lens_idx": 67143,
+      "fov": 55.0,
+      "fnum": 2.2,
+      "aper": 2.0,
+      "calc_rms": 0.015389338901536816,
+      "calc_effl": 16.5998044510486,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 183
+  },
+  {
+    "id": "E_025",
+    "type": "partial",
+    "query": "我需要视场 26.0°、光圈 F/3.2 的镜头方案，口径不限",
+    "constraints": {
+      "fov": 26.0,
+      "fnum": 3.2
+    },
+    "ground_truth": {
+      "lens_idx": 618,
+      "fov": 26.0,
+      "fnum": 3.2,
+      "aper": 4.0,
+      "calc_rms": 0.001120049423000522,
+      "calc_effl": 47.66987627975084,
+      "source": "read_data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "tol_fov": 2.0,
+      "tol_fnum": 0.3,
+      "tol_aper": 999
+    },
+    "global_id": 184
+  },
+  {
+    "id": "A_031",
+    "type": "in_domain",
+    "query": "我需要设计一款视场角 14.0°、光圈 F/5.8、入瞳口径 8.0mm 的镜头",
+    "constraints": {
+      "fov": 14.0,
+      "fnum": 5.8,
+      "aper": 8.0
+    },
+    "ground_truth": {
+      "lens_idx": 56370,
+      "fov": 14.0,
+      "fnum": 5.8,
+      "aper": 8.0,
+      "calc_rms": 0.0022414078248331614,
+      "calc_effl": 82.81019255964799,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0
+    },
+    "global_id": 185
+  },
+  {
+    "id": "B_020",
+    "type": "out_of_domain",
+    "query": "请帮我设计 FOV=5.0度 F/12.0 口径 10.0mm 的镜头方案",
+    "constraints": {
+      "fov": 5.0,
+      "fnum": 12.0,
+      "aper": 10.0
+    },
+    "ground_truth": {
+      "lens_idx": 7202,
+      "fov": 5.0,
+      "fnum": 6.0,
+      "aper": 10.0,
+      "calc_rms": 0.0034344703540311063,
+      "calc_effl": 247.96387968197345,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 186
+  },
+  {
+    "id": "B_025",
+    "type": "out_of_domain",
+    "query": "帮我设计一个 FOV=100.0度、F/6.2、口径 10.0mm 的镜头",
+    "constraints": {
+      "fov": 100.0,
+      "fnum": 6.2,
+      "aper": 10.0
+    },
+    "ground_truth": {
+      "lens_idx": 115449,
+      "fov": 59.0,
+      "fnum": 5.6,
+      "aper": 4.0,
+      "calc_rms": 0.011363838543294709,
+      "calc_effl": 16.195846265893078,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 187
+  },
+  {
+    "id": "B_039",
+    "type": "out_of_domain",
+    "query": "设计一个 FOV=2.0 度、F 数为 10.0、通光口径 8.0mm 的光学系统",
+    "constraints": {
+      "fov": 2.0,
+      "fnum": 10.0,
+      "aper": 8.0
+    },
+    "ground_truth": {
+      "lens_idx": 149,
+      "fov": 4.0,
+      "fnum": 5.5,
+      "aper": 2.0,
+      "calc_rms": 0.0021578328210062714,
+      "calc_effl": 247.9501136954521,
+      "source": "read_data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 188
+  },
+  {
+    "id": "B_030",
+    "type": "out_of_domain",
+    "query": "我要设计一款 45.0 度视场、F/16.0、口径 2.0mm 的镜头",
+    "constraints": {
+      "fov": 45.0,
+      "fnum": 16.0,
+      "aper": 2.0
+    },
+    "ground_truth": {
+      "lens_idx": 23328,
+      "fov": 45.0,
+      "fnum": 6.0,
+      "aper": 10.0,
+      "calc_rms": 0.0022902898430854227,
+      "calc_effl": 21.758951104076026,
+      "source": "read_data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 5.0,
+      "tol_fnum": 0.5,
+      "tol_aper": 3.0
+    },
+    "global_id": 189
+  },
+  {
+    "id": "D_037",
+    "type": "range",
+    "query": "视场 10.0~16.0 度 光圈 F/1.6~F/2.2 推荐 RMS 最小的方案",
+    "constraints": {
+      "fov_min": 10.0,
+      "fov_max": 16.0,
+      "fnum_min": 1.6,
+      "fnum_max": 2.2
+    },
+    "ground_truth": {
+      "lens_idx": 131215,
+      "fov": 16.0,
+      "fnum": 2.0,
+      "aper": 6.0,
+      "calc_rms": 5.627423109064902e-05,
+      "calc_effl": 81.33428088272686,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        10.0,
+        16.0
+      ],
+      "fnum_range": [
+        1.6,
+        2.2
+      ],
+      "tol_fov": 6.0,
+      "tol_fnum": 0.6000000000000001,
+      "tol_aper": 999
+    },
+    "global_id": 190
+  },
+  {
+    "id": "E_020",
+    "type": "partial",
+    "query": "我需要视场 32.0°、光圈 F/3.1 的镜头方案，口径不限",
+    "constraints": {
+      "fov": 32.0,
+      "fnum": 3.1
+    },
+    "ground_truth": {
+      "lens_idx": 73304,
+      "fov": 32.0,
+      "fnum": 3.4,
+      "aper": 0.0,
+      "calc_rms": 0.03650563978022289,
+      "calc_effl": 38.66759401301785,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "tol_fov": 2.0,
+      "tol_fnum": 0.3,
+      "tol_aper": 999
+    },
+    "global_id": 191
+  },
+  {
+    "id": "D_011",
+    "type": "range",
+    "query": "帮我设计视场角 36.0~42.0 度、光圈 F/4.0~F/4.6 的镜头，RMS 越小越好",
+    "constraints": {
+      "fov_min": 36.0,
+      "fov_max": 42.0,
+      "fnum_min": 4.0,
+      "fnum_max": 4.6
+    },
+    "ground_truth": {
+      "lens_idx": 11697,
+      "fov": 40.0,
+      "fnum": 4.0,
+      "aper": 8.0,
+      "calc_rms": 0.0001445080612870904,
+      "calc_effl": 27.87401125274311,
+      "source": "read_data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        36.0,
+        42.0
+      ],
+      "fnum_range": [
+        4.0,
+        4.6
+      ],
+      "tol_fov": 6.0,
+      "tol_fnum": 0.5999999999999996,
+      "tol_aper": 999
+    },
+    "global_id": 192
+  },
+  {
+    "id": "D_005",
+    "type": "range",
+    "query": "帮我设计视场角 41.0~51.0 度、光圈 F/1.6~F/3.0 的镜头，RMS 越小越好",
+    "constraints": {
+      "fov_min": 41.0,
+      "fov_max": 51.0,
+      "fnum_min": 1.6,
+      "fnum_max": 3.0
+    },
+    "ground_truth": {
+      "lens_idx": 73620,
+      "fov": 51.0,
+      "fnum": 2.4,
+      "aper": 6.0,
+      "calc_rms": 0.00013902159932467043,
+      "calc_effl": 19.24944708252035,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        41.0,
+        51.0
+      ],
+      "fnum_range": [
+        1.6,
+        3.0
+      ],
+      "tol_fov": 10.0,
+      "tol_fnum": 1.4,
+      "tol_aper": 999
+    },
+    "global_id": 193
+  },
+  {
+    "id": "C_021",
+    "type": "specific",
+    "query": "帮我设计一个 FOV=49.0度、F/5.5、口径 12.0mm 的镜头，RMS 小于 0.660mm",
+    "constraints": {
+      "fov": 49.0,
+      "fnum": 5.5,
+      "aper": 12.0,
+      "rms_target": 0.66
+    },
+    "ground_truth": {
+      "lens_idx": 119579,
+      "fov": 49.0,
+      "fnum": 5.5,
+      "aper": 6.0,
+      "calc_rms": 0.0194456702907993,
+      "calc_effl": 22.434234336601104,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.66
+    },
+    "global_id": 194
+  },
+  {
+    "id": "E_031",
+    "type": "partial",
+    "query": "设计一款通光口径 12.0mm 的光学系统，成像质量尽量好",
+    "constraints": {
+      "aper": 12.0
+    },
+    "ground_truth": {
+      "lens_idx": 114476,
+      "fov": 27.0,
+      "fnum": 5.4,
+      "aper": 12.0,
+      "calc_rms": 6.975500417377125e-07,
+      "calc_effl": 46.91575427122026,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": false,
+      "has_fnum": false,
+      "has_aper": true,
+      "tol_fov": 999,
+      "tol_fnum": 999,
+      "tol_aper": 1.5
+    },
+    "global_id": 195
+  },
+  {
+    "id": "D_029",
+    "type": "range",
+    "query": "视场 39.0~53.0 度 光圈 F/1.6~F/3.1 推荐 RMS 最小的方案",
+    "constraints": {
+      "fov_min": 39.0,
+      "fov_max": 53.0,
+      "fnum_min": 1.6,
+      "fnum_max": 3.1
+    },
+    "ground_truth": {
+      "lens_idx": 73620,
+      "fov": 51.0,
+      "fnum": 2.4,
+      "aper": 6.0,
+      "calc_rms": 0.00013902159932467043,
+      "calc_effl": 19.24944708252035,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        39.0,
+        53.0
+      ],
+      "fnum_range": [
+        1.6,
+        3.1
+      ],
+      "tol_fov": 14.0,
+      "tol_fnum": 1.5,
+      "tol_aper": 999
+    },
+    "global_id": 196
+  },
+  {
+    "id": "D_009",
+    "type": "range",
+    "query": "帮我设计视场角 37.0~51.0 度、光圈 F/4.0~F/4.6 的镜头，RMS 越小越好",
+    "constraints": {
+      "fov_min": 37.0,
+      "fov_max": 51.0,
+      "fnum_min": 4.0,
+      "fnum_max": 4.6
+    },
+    "ground_truth": {
+      "lens_idx": 105047,
+      "fov": 51.0,
+      "fnum": 4.3,
+      "aper": 12.0,
+      "calc_rms": 0.00013860182665999997,
+      "calc_effl": 19.488808551704473,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": false,
+      "fov_range": [
+        37.0,
+        51.0
+      ],
+      "fnum_range": [
+        4.0,
+        4.6
+      ],
+      "tol_fov": 14.0,
+      "tol_fnum": 0.5999999999999996,
+      "tol_aper": 999
+    },
+    "global_id": 197
+  },
+  {
+    "id": "C_016",
+    "type": "specific",
+    "query": "我需要设计一款视场角 50.0°、光圈 F/2.6、入瞳口径 8.0mm 的镜头，RMS 小于 0.168mm",
+    "constraints": {
+      "fov": 50.0,
+      "fnum": 2.6,
+      "aper": 8.0,
+      "rms_target": 0.168
+    },
+    "ground_truth": {
+      "lens_idx": 15948,
+      "fov": 50.0,
+      "fnum": 2.6,
+      "aper": 8.0,
+      "calc_rms": 0.03910247997803918,
+      "calc_effl": 19.57351830286184,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.168
+    },
+    "global_id": 198
+  },
+  {
+    "id": "C_022",
+    "type": "specific",
+    "query": "请帮我设计 FOV=9.0度 F/3.4 口径 8.0mm 的镜头方案，RMS 小于 0.043mm",
+    "constraints": {
+      "fov": 9.0,
+      "fnum": 3.4,
+      "aper": 8.0,
+      "rms_target": 0.043
+    },
+    "ground_truth": {
+      "lens_idx": 115756,
+      "fov": 9.0,
+      "fnum": 3.4,
+      "aper": 10.0,
+      "calc_rms": 0.0020864136422708898,
+      "calc_effl": 122.20977403030379,
+      "source": "data.xlsx"
+    },
+    "eval_config": {
+      "has_fov": true,
+      "has_fnum": true,
+      "has_aper": true,
+      "tol_fov": 1.0,
+      "tol_fnum": 0.2,
+      "tol_aper": 1.0,
+      "rms_target": 0.043
+    },
+    "global_id": 199
+  }
+]
