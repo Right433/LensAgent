@@ -93,6 +93,10 @@ _OPTIMIZE_MAX = 6
 _OPTIMIZE_STALL: dict = {}
 
 
+def _strip_think(text: str) -> str:
+    import re
+    return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+
 def _parse_tool_input(input_str: str) -> dict:
     """兼容 'lens_idx=36237, ...' 和 '36237, ...' 两种格式"""
     input_str = str(input_str).strip().strip(chr(34)).strip(chr(39))
@@ -252,18 +256,29 @@ def rank_by_rms(query: str) -> str:
                  "effl": round(m.get("calc_effl", 0), 2), "rms": round(rms, 4)}
                 for rms, m in top20
             ]
+            try:
+                from retrieval_skills import RETRIEVAL_SELECTION_PROMPT
+            except ImportError:
+                RETRIEVAL_SELECTION_PROMPT = (
+                    "你是光学设计专家。用户需要 FOV={fov_target}° F/{fnum_target} 的镜头，数据库中没有精确匹配。\n"
+                    "以下是候选镜头列表：\n{candidates_json}\n\n"
+                    "选镜规则（按优先级）：\n"
+                    "- FOV越接近目标越好，宁大勿小（大→小容易，小→大几乎不可能）\n"
+                    "- F_number宁小勿大（小F数=大光圈，收缩比扩大容易）\n"
+                    "- EFFL差距无所谓，可等比缩放，不作为筛选依据\n"
+                    "- RMS同等条件下越小越好\n"
+                    "- 对称或近对称结构更容易优化\n"
+                    "请从候选中选出最适合作为优化起点的5个镜头编号。\n"
+                    "只返回JSON数组，格式：[lens_idx, ...]"
+                )
+            gemini_prompt = RETRIEVAL_SELECTION_PROMPT.format(
+                fov_target=fov_target,
+                fnum_target=fnum_target,
+                candidates_json=json.dumps(candidates_desc, ensure_ascii=False)
+            )
             gemini_resp = _cli.chat.completions.create(
                 model="gemini-3.1-pro-preview",
-                messages=[{"role": "user", "content": f"""你是光学设计专家。用户需要 FOV={fov_target}° F/{fnum_target} 的镜头，数据库中没有精确匹配。
-以下是候选镜头列表：
-{json.dumps(candidates_desc, ensure_ascii=False)}
-
-选镜规则：
-- FOV越接近目标越好，宁大勿小（FOV偏大容易缩小，偏小无法扩大）
-- EFFL差距不重要，可以等比例缩放
-- F数宁小勿大（小F数光圈大，容易收缩；大F数难以扩大）
-
-请从候选中选出最适合作为优化起点的5个镜头，只返回JSON数组，格式：[lens_idx, ...]"""}],
+                messages=[{"role": "user", "content": gemini_prompt}],
                 max_tokens=200
             )
             resp_text = gemini_resp.choices[0].message.content.strip()
@@ -289,7 +304,7 @@ def rank_by_rms(query: str) -> str:
 
     out = {"results": results_list}
     if fallback:
-        from retrieval_skills import RETRIEVAL_SKILL_SUMMARY
+        from retrieval_skills import RETRIEVAL_SKILL_SHORT as RETRIEVAL_SKILL_SUMMARY
         # 计算返回镜头的 EFFL 偏差提示
         effl_hints = []
         for r in results_list:
@@ -578,7 +593,7 @@ def align_effl(input_str: str) -> str:
 
     # 放缩比例限制：超过 ±30% 警告，超过 ±60% 拒绝
     scale_pct = abs(scale - 1.0) * 100
-    if scale_pct > 60:
+    if scale_pct > 85:
         return (f"⚠ 放缩比例过大（{scale:.3f}，偏差{scale_pct:.0f}%），拒绝执行。"
                 f"当前EFFL={current_effl:.2f}mm，目标={target_effl}mm，差距过大，"
                 f"镜头结构不适合此目标EFFL，建议重新检索更接近的起始镜头。")
@@ -1023,11 +1038,11 @@ TOTR超限 → 最大空气间隔thickness减小10%
 SYSTEM_PROMPT = """/no_think
 你是光学镜头设计专家（CDGM玻璃库）。流程：①lens_search检索→②rms_calculator评估→③未达标则modify_lens优化，最多6次。
 优化步骤（严格按顺序执行）：
-Step0 若用户未给出FOV/F数等参数→先调用interpret_requirement翻译需求
+Step0 若用户已明确给出FOV和F数（如"FOV=150度 F/1.2"），【跳过interpret_requirement】，直接进Step0b；若用户未给出FOV/F数等参数→先调用interpret_requirement翻译需求
 Step0b rank_by_rms时加fov_tol/fnum_tol过滤，如: FOV=75度 F/2.4, fov_tol=5, fnum_tol=0.5
-★ Out-of-domain规则：若rank_by_rms返回warning，【立即停止所有检索】，直接取返回结果中rank=1的镜头，调用rms_calculator评估，然后align_effl对齐焦距，再local_optimize优化。禁止再次调用lens_search或rank_by_rms。
+★ Out-of-domain规则：若rank_by_rms返回warning，【立即停止所有检索】，直接取返回结果中rank=1的镜头，调用rms_calculator评估，然后align_effl对齐焦距，再local_optimize优化。禁止再次调用lens_search或rank_by_rms。若返回镜头FOV < 目标FOV×0.5，Final Answer中必须注明"数据库无精确匹配，以最近邻结果代替"。禁止因RMS达标就直接结束，必须先执行align_effl + local_optimize再输出Final Answer。
 Step1【必须】rms_calculator评估初始RMS
-Step2 仅当用户明确说"EFFL=xx mm"或"焦距=xx mm"时才调用align_effl，否则跳过此步
+Step2 以下两种情况【必须】调用align_effl：①用户明确说"EFFL=xx mm"或"焦距=xx mm"；②rms_calculator返回的EFFL超过目标值的130%，或用户未给目标但EFFL>80mm。target_effl取用户指定值，或取当前EFFL×0.6（启发式）。align_effl失败(偏差>85%)则换rank=2镜头重试，勿再次检索。
 Step3 若某面thickness>8mm或RMS主要由球差主导→先split_lens拆分该面，再local_optimize
 Step4 若仍未达标：modify_lens换材料（色差→H-FK61/H-FK71正镜+H-ZF7LA负镜；球差→H-ZLAF55D；场曲→负镜H-ZF7LA）
 优化策略索引（识别症状后调用get_skill_detail获取详细操作）：
@@ -1045,6 +1060,8 @@ Thought: 分析
 Action: rms_calculator
 Action Input: 36237
 
+【严禁】每次只能输出一个Action，禁止在同一次输出中同时写多个Action。
+【严禁】禁止在同一次输出中同时出现Action和Final Answer，二者只能选其一。
 错误示例（禁止）：Action: rms_calculator(lens_idx="36237")
 
  达到目标或完成判断后，必须立即输出 Final Answer，禁止继续调用工具：
@@ -1072,14 +1089,51 @@ def build_skill_index_text():
 @tool
 def get_skill_detail(skill_name: str) -> str:
     """获取某个优化策略的完整详细内容。输入策略名称，如\'利用高阿贝数低色散玻璃消除轴上色差\'。"""
+    def _fuzzy_get(d: dict, key: str):
+        if key in d:
+            return d[key]
+        key_lower = key.lower().strip()
+        for k, v in d.items():
+            if k.lower().startswith(key_lower) or key_lower in k.lower():
+                return v
+        return None
+
     try:
         from lens_skills_full import LENS_SKILLS_FULL
-        detail = LENS_SKILLS_FULL.get(skill_name)
+        detail = _fuzzy_get(LENS_SKILLS_FULL, skill_name)
         if detail:
             return detail
     except ImportError:
         pass
-    return SKILL_SUMMARIES.get(skill_name, f"未找到策略: {skill_name}")
+    result = _fuzzy_get(SKILL_SUMMARIES, skill_name)
+    return result if result else f"未找到策略: {skill_name}。请用完整名称，如'Skill 1: 利用高阿贝数低色散玻璃消除轴上色差'"
+
+
+@tool
+def get_retrieval_skill_detail(skill_name: str) -> str:
+    """
+    【检索策略详情】获取某条镜头检索 skill 的完整操作指引。
+    适用场景: rank_by_rms 返回 warning（out-of-domain 或 EFFL偏差>60%）时，
+              Agent 根据 summary 索引判断需要哪条规则，再调用此工具获取详情。
+    输入: skill 名称，如 'Skill R3: EFFL差距处理' 或只写 'R3'
+    """
+    def _fuzzy_get(d: dict, key: str):
+        if key in d:
+            return d[key]
+        key_l = key.lower().strip()
+        for k, v in d.items():
+            if k.lower().startswith(key_l) or key_l in k.lower():
+                return v
+        return None
+
+    try:
+        from retrieval_skills import RETRIEVAL_SKILLS_FULL
+        detail = _fuzzy_get(RETRIEVAL_SKILLS_FULL, skill_name)
+        if detail:
+            return detail
+    except ImportError:
+        pass
+    return f"未找到检索 skill: {skill_name}。请用完整名称，如 'Skill R3: EFFL差距处理'"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1099,14 +1153,61 @@ def _zemax_available():
         return False
 
 @tool
+def zemax_layout(input_str: str) -> str:
+    """
+    【Zemax Layout图】将当前镜头面型推送到 Zemax 并生成 2D 布局图，保存为 PNG。
+    输入格式: "lens_idx=<编号>, save_path=<保存路径>"
+    示例: "lens_idx=36237, save_path=/gz-data/layout_36237.png"
+    save_path 可省略，默认 /gz-data/layout_<lens_idx>.png
+    """
+    try:
+        parts = {}
+        for seg in str(input_str).strip().split(","):
+            seg = seg.strip()
+            if "=" in seg:
+                k, v = seg.split("=", 1)
+                parts[k.strip()] = v.strip()
+        lens_idx  = int(parts.get("lens_idx", 0))
+        save_path = parts.get("save_path", f"/gz-data/layout_{lens_idx}.png")
+    except Exception as e:
+        return f"输入格式错误: {e}"
+
+    if not _zemax_available():
+        return "Zemax桥接服务不可用，请确认Windows端 zemax_bridge.py 已启动"
+
+    lens  = ALL_LENSES[lens_idx]
+    surfs = lens.get("surfaces", [])
+    if isinstance(surfs, str):
+        import ast as _ast
+        surfs = _ast.literal_eval(surfs)
+
+    try:
+        # 推送完整面型
+        _requests.post(f"{ZEMAX_BRIDGE}/load_lens",
+                       json={"surfaces": surfs,
+                             "fov":  lens.get("fov"),
+                             "fnum": lens.get("fnum")},
+                       timeout=10)
+        # 生成 layout 图
+        resp = _requests.post(f"{ZEMAX_BRIDGE}/layout", timeout=30)
+        if not resp.ok:
+            return f"Layout 生成失败: {resp.text}"
+        with open(save_path, "wb") as f:
+            f.write(resp.content)
+        return f"✓ Layout 图已保存: {save_path}  ({len(resp.content)//1024} KB)"
+    except Exception as e:
+        return f"Zemax调用异常: {e}"
+
+
+@tool
 def zemax_optimize(input_str: str) -> str:
     """
-    【Zemax精确优化】调用真实Zemax OpticStudio对镜头做DLS优化，比近轴追迹更精确。
+    【Zemax精确优化】将当前面型推送到 Zemax 做 DLS 局部优化，比近轴追迹更精确。
     适合：近轴优化停滞、需要验证真实光线追迹结果时。
     输入格式: "lens_idx=<编号>, cycles=<优化轮数>"
       - cycles: 默认5，范围1-20
     示例: "lens_idx=36237, cycles=5"
-    输出: Zemax优化后的merit function值。
+    输出: Zemax优化后的merit function值。优化完毕建议调用 zemax_layout 出图。
     """
     try:
         parts = {}
@@ -1121,9 +1222,8 @@ def zemax_optimize(input_str: str) -> str:
         return f"输入格式错误: {e}"
 
     if not _zemax_available():
-        return "Zemax桥接服务不可用，请确认Windows端Flask服务已启动"
+        return "Zemax桥接服务不可用，请确认Windows端 zemax_bridge.py 已启动"
 
-    # 先把当前面型推送到Zemax
     lens  = ALL_LENSES[lens_idx]
     surfs = lens.get("surfaces", [])
     if isinstance(surfs, str):
@@ -1131,25 +1231,21 @@ def zemax_optimize(input_str: str) -> str:
         surfs = _ast.literal_eval(surfs)
 
     try:
-        # 逐面更新
-        for s in surfs:
-            idx = int(s.get("surface_num", 0))
-            r   = s.get("radius")
-            t   = s.get("thickness")
-            payload = {"index": idx}
-            if r is not None and abs(r) < 1e8:
-                payload["radius"] = r
-            if t is not None:
-                payload["thickness"] = t
-            _requests.post(f"{ZEMAX_BRIDGE}/set_surface", json=payload, timeout=5)
-
-        # 调用优化
-        resp = _requests.post(f"{ZEMAX_BRIDGE}/optimize", json={"cycles": cycles}, timeout=60)
+        # 推送完整面型
+        _requests.post(f"{ZEMAX_BRIDGE}/load_lens",
+                       json={"surfaces": surfs,
+                             "fov":  lens.get("fov"),
+                             "fnum": lens.get("fnum")},
+                       timeout=10)
+        # DLS 优化
+        resp = _requests.post(f"{ZEMAX_BRIDGE}/zemax_optimize",
+                              json={"cycles": cycles}, timeout=120)
         data = resp.json()
         if "error" in data:
             return f"Zemax优化失败: {data['error']}"
         merit = data.get("merit", "N/A")
-        return f"✓ Zemax优化完成 merit={merit:.6f} (cycles={cycles})\n建议调用rms_calculator验证近轴RMS。"
+        return (f"✓ Zemax DLS优化完成 merit={merit:.6f} (cycles={cycles})\n"
+                f"建议调用 rms_calculator 验证近轴RMS，或调用 zemax_layout 生成布局图。")
     except Exception as e:
         return f"Zemax调用异常: {e}"
 def build_agent():
@@ -1166,7 +1262,9 @@ def build_agent():
         split_lens,
         interpret_requirement,
         zemax_optimize,
+        zemax_layout,
         get_skill_detail,  # 两级加载：按需拉取完整 skill
+        get_retrieval_skill_detail,  # 检索策略详情：out-of-domain / EFFL偏差时按需调用
     ]
     # 动态注入 skill_index（只注入 summary，节省 token）
     skill_index_text = build_skill_index_text()
@@ -1174,14 +1272,30 @@ def build_agent():
         SYSTEM_PROMPT.replace("{skill_index}", skill_index_text)
     )
     agent    = create_react_agent(llm, tools, prompt)
-    executor = AgentExecutor(
+    _executor = AgentExecutor(
         agent=agent,
         tools=tools,
         verbose=True,
         max_iterations=30,
         handle_parsing_errors=True,
     )
-    return executor
+
+    class CleanExecutor:
+        """包装 AgentExecutor，自动清洗 <think> 标签"""
+        def __init__(self, exe):
+            self._exe = exe
+        def invoke(self, inputs, **kwargs):
+            if isinstance(inputs.get("input"), str):
+                inputs = dict(inputs)
+                inputs["input"] = _strip_think(inputs["input"])
+            result = self._exe.invoke(inputs, **kwargs)
+            if isinstance(result.get("output"), str):
+                result["output"] = _strip_think(result["output"])
+            return result
+        def __getattr__(self, name):
+            return getattr(self._exe, name)
+
+    return CleanExecutor(_executor)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
