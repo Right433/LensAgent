@@ -143,18 +143,6 @@ def check_spec(input_str: str) -> str:
 
     passed = len(reasons) == 0
 
-    # ─── 不可达检测：F# 偏差>30% 或 FOV 偏差>50% 标 infeasible ───
-    import re as _re
-    infeasible = []
-    for _reason in reasons:
-        _m = _re.search(r'偏差([\d.]+)%', _reason)
-        if not _m:
-            continue
-        _dev = float(_m.group(1))
-        if 'F#' in _reason and _dev > 30:
-            infeasible.append(f'F#差距{_dev:.0f}%超出local_optimize能力,需换候选')
-        elif 'FOV' in _reason and _dev > 50:
-            infeasible.append(f'FOV差距{_dev:.0f}%需换结构,无法通过优化修复')
 
     # 基于失败原因给 agent 下一步提示
     if passed:
