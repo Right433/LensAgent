@@ -1,3 +1,11 @@
+# ─── dotenv 自动加载 ───
+import os
+try:
+    from dotenv import load_dotenv
+    load_dotenv("/gz-data/.env")
+except ImportError:
+    pass
+
 import os, sys, ast, copy, pickle, argparse, json
 from pathlib import Path
 
@@ -11,10 +19,28 @@ from langchain.agents.agent import AgentExecutor
 from langchain_core.prompts import PromptTemplate
 
 sys.path.insert(0, "/gz-data")
+import sys as _sys; _sys.modules.setdefault("agent_zemax", _sys.modules[__name__])
 
-BASE_URL  = "http://localhost:8080/v1"
+# self-evolve 模块（check_spec / 轨迹记录 / 蒸馏）
+try:
+    from self_evolve import (
+        check_spec, record_step,
+        start_session, end_session,
+        load_learned_for_prompt, get_learned_detail,
+    )
+    _HAS_SELF_EVOLVE = True
+except ImportError:
+    _HAS_SELF_EVOLVE = False
+    print("⚠ self_evolve 未找到，self-evolve 功能禁用")
+    def record_step(*a, **kw): pass
+    def start_session(*a, **kw): pass
+    def end_session(*a, **kw): return {}
+    def load_learned_for_prompt(): return {}
+    def get_learned_detail(name): return None
+
+BASE_URL  = "http://localhost:8001/v1"
 API_KEY   = "EMPTY"
-LLM_MODEL = "qwen3-14b"
+LLM_MODEL = "qwen3"
 EMB_MODEL = "/root/.cache/huggingface/hub/models--shibing624--text2vec-base-chinese/snapshots/183bb99aa7af74355fb58d16edf8c13ae7c5433e"
 FAISS_DIR = "/gz-data/faiss_index"
 
@@ -132,16 +158,22 @@ def lens_search(query: str) -> str:
     if not results:
         return "未检索到相关镜头"
     results_list = []
-    for i, doc in enumerate(results):
+    rank = 0
+    for doc in results:
         m = doc.metadata
         rms  = m.get("calc_rms")
         effl = m.get("calc_effl")
+        # 过滤坏数据：rms/effl 任一为 None 跳过
+        if rms is None or effl is None:
+            continue
+        rank += 1
         results_list.append({
-            "rank": i+1, "id": m.get('lens_idx'),
-            "fov": m.get('fov'), "fnum": m.get('fnum'),
-            "effl": round(effl,2) if effl else None,
-            "rms": round(rms,4) if rms else None
+            "rank": rank, "id": m.get("lens_idx"),
+            "fov": m.get("fov"), "fnum": m.get("fnum"),
+            "effl": round(effl, 2),
+            "rms": round(rms, 4),
         })
+        if rank >= 5: break
     return json.dumps(results_list, ensure_ascii=False)
 
 
@@ -202,104 +234,95 @@ def rank_by_rms(query: str) -> str:
     if tol_fov_m:  fov_tol  = float(tol_fov_m.group(1))
     if tol_fn_m:   fnum_tol = float(tol_fn_m.group(1))
 
-    results = VS.similarity_search(query, k=50)  # 扩大检索池再过滤
-    candidates = []
-    all_candidates = []  # 保留全部用于无匹配时的fallback
-    for doc in results:
-        m   = doc.metadata
-        rms = m.get("calc_rms")
-        if rms is None:
-            continue
-        all_candidates.append((rms, m))
-        # FOV 过滤
-        if fov_target is not None:
-            fov = m.get("fov")
-            if fov is None or abs(float(fov) - fov_target) > fov_tol:
-                continue
-        # Fnum 过滤
-        if fnum_target is not None:
-            fnum = m.get("fnum")
-            if fnum is None or abs(float(fnum) - fnum_target) > fnum_tol:
-                continue
-        candidates.append((rms, m))
+    # ─── 纯数值近邻：FOV 主导，Fnum 次要 tiebreaker（Fnum 能靠扩光阑优化） ───
+    def _distance(lens, idx):
+        d = 0.0
+        # FOV 是主排序键（权重大）
+        if fov_target is not None and fov_target > 0:
+            fov = lens.get("fov")
+            if fov is None:
+                return 1e9
+            rel = (float(fov) - fov_target) / fov_target
+            d += abs(rel) * 10.0  # 对称惩罚，值大的优先排小，保证 FOV 最近的一定排前面
+        # Fnum 只作次要 tiebreaker（权重小），因为 Fnum 能靠改光阑优化
+        if fnum_target is not None and fnum_target > 0:
+            fnum = lens.get("fnum")
+            if fnum is not None:
+                rel = (float(fnum) - fnum_target) / fnum_target
+                # Fnum 偏大（需扩光阑）惩罚略高于偏小
+                d += abs(rel) * 1.0 if rel > 0 else abs(rel) * 0.5
+        # RMS 只作极小权重
+        rms = lens.get("calc_rms")
+        if rms is not None:
+            d += float(rms) * 0.01
+        return d
 
-    # 若过滤后无结果，fallback 到全库并按规则加权排序
-    fallback = False
+    # 全库打分，直接取距离最近的 top20（不过滤，规则：FOV 最接近 → Fnum 最接近）
+    scored_all = []
+    for i, lens in enumerate(ALL_LENSES):
+        if lens.get("calc_rms") is None:
+            continue
+        scored_all.append((_distance(lens, i), i, lens))
+    scored_all.sort(key=lambda x: x[0])
+    top20 = [(float(l.get("calc_rms")), {**l, "lens_idx": i}) for _, i, l in scored_all[:20]]
+
+    # 从 top-20 让 Gemini 按 Skill R1 规则选 top-5
+    candidates = []
+    try:
+        from openai import OpenAI
+        from retrieval_skills import RETRIEVAL_SELECTION_PROMPT
+        _cli = OpenAI(
+            api_key="sk-uwMXbGBi2LKb9EnmGIOQT1QOISpA8jgazzvXwVLq5o5h79WZ",
+            base_url="https://us.novaiapi.com/v1",
+        )
+        candidates_desc = [
+            {"lens_idx": m["lens_idx"], "fov": m.get("fov"), "fnum": m.get("fnum"),
+             "effl": round(m.get("calc_effl") or 0, 2), "rms": round(rms, 4)}
+            for rms, m in top20
+        ]
+        print(f"\n[OOD-DEBUG] top20 FOV: {sorted(set(round(c["fov"] or 0, 0) for c in candidates_desc))}")
+        print(f"[OOD-DEBUG] top20 Fnum: {sorted(set(round(c["fnum"] or 0, 1) for c in candidates_desc))}")
+        gemini_prompt = RETRIEVAL_SELECTION_PROMPT.format(
+            fov_target=fov_target, fnum_target=fnum_target,
+            candidates_json=json.dumps(candidates_desc, ensure_ascii=False),
+        )
+        gemini_resp = _cli.chat.completions.create(
+            model=os.environ.get("GEMINI_MODEL_SELECT", "gemini-3-flash-preview"),
+            messages=[{"role": "user", "content": gemini_prompt}],
+            max_tokens=200,
+        )
+        resp_text = gemini_resp.choices[0].message.content.strip()
+        resp_text = resp_text.replace("```json", "").replace("```", "").strip()
+        print(f"[OOD-DEBUG] Gemini 选择: {resp_text[:200]}")
+        selected_ids = json.loads(resp_text)
+        id_map = {m["lens_idx"]: (rms, m) for rms, m in top20}
+        candidates = [id_map[idx] for idx in selected_ids if idx in id_map]
+    except Exception as e:
+        print(f"[OOD-DEBUG] Gemini 选镜失败，退回数值距离前5: {e}")
+    # Gemini 失败或返回空则退回距离前5
     if not candidates:
-        fallback = True
-        def retrieval_score(item):
-            rms, m = item
-            score = 0.0
-            if fov_target is not None:
-                fov = float(m.get("fov") or fov_target)
-                fov_diff = fov - fov_target
-                score += abs(fov_diff) * 3.0 if fov_diff < 0 else fov_diff * 0.5
-            if fnum_target is not None:
-                fnum = float(m.get("fnum") or fnum_target)
-                fnum_diff = fnum - fnum_target
-                score += fnum_diff * 3.0 if fnum_diff > 0 else abs(fnum_diff) * 0.5
-            score += rms * 0.5
-            return score
-        full_pool = [(l.get("calc_rms"), {**l, "lens_idx": i}) for i, l in enumerate(ALL_LENSES)
-                     if l.get("calc_rms") is not None]
-        # 先按加权评分取 top-20
-        top20 = sorted(full_pool, key=retrieval_score)[:20]
-        # 调 Gemini 从 top-20 里选最适合的 top-5
-        try:
-            from openai import OpenAI
-            _cli = OpenAI(
-                api_key="sk-uwMXbGBi2LKb9EnmGIOQT1QOISpA8jgazzvXwVLq5o5h79WZ",
-                base_url="https://us.novaiapi.com/v1"
-            )
-            candidates_desc = [
-                {"lens_idx": m["lens_idx"], "fov": m.get("fov"), "fnum": m.get("fnum"),
-                 "effl": round(m.get("calc_effl", 0), 2), "rms": round(rms, 4)}
-                for rms, m in top20
-            ]
-            try:
-                from retrieval_skills import RETRIEVAL_SELECTION_PROMPT
-            except ImportError:
-                RETRIEVAL_SELECTION_PROMPT = (
-                    "你是光学设计专家。用户需要 FOV={fov_target}° F/{fnum_target} 的镜头，数据库中没有精确匹配。\n"
-                    "以下是候选镜头列表：\n{candidates_json}\n\n"
-                    "选镜规则（按优先级）：\n"
-                    "- FOV越接近目标越好，宁大勿小（大→小容易，小→大几乎不可能）\n"
-                    "- F_number宁小勿大（小F数=大光圈，收缩比扩大容易）\n"
-                    "- EFFL差距无所谓，可等比缩放，不作为筛选依据\n"
-                    "- RMS同等条件下越小越好\n"
-                    "- 对称或近对称结构更容易优化\n"
-                    "请从候选中选出最适合作为优化起点的5个镜头编号。\n"
-                    "只返回JSON数组，格式：[lens_idx, ...]"
-                )
-            gemini_prompt = RETRIEVAL_SELECTION_PROMPT.format(
-                fov_target=fov_target,
-                fnum_target=fnum_target,
-                candidates_json=json.dumps(candidates_desc, ensure_ascii=False)
-            )
-            gemini_resp = _cli.chat.completions.create(
-                model="gemini-3.1-pro-preview",
-                messages=[{"role": "user", "content": gemini_prompt}],
-                max_tokens=200
-            )
-            resp_text = gemini_resp.choices[0].message.content.strip()
-            resp_text = resp_text.replace("```json","").replace("```","").strip()
-            selected_ids = json.loads(resp_text)
-            id_map = {{m["lens_idx"]: (rms, m) for rms, m in top20}}
-            candidates = [id_map[idx] for idx in selected_ids if idx in id_map]
-            if not candidates:
-                candidates = top20
-        except Exception:
-            candidates = top20
+        candidates = top20[:5]
     else:
-        candidates.sort(key=lambda x: x[0])
-    candidates = candidates[:5]  # 只返回top-5节省token
+        candidates = candidates[:5]
+
+    # 判定是否算 OOD（最佳候选 FOV 或 Fnum 偏差大就警告 agent）
+    is_ood = False
+    if candidates and (fov_target is not None or fnum_target is not None):
+        _, best = candidates[0]
+        best_fov = best.get("fov")
+        best_fnum = best.get("fnum")
+        if fov_target and best_fov and abs(float(best_fov) - fov_target) > fov_tol:
+            is_ood = True
+        if fnum_target and best_fnum and abs(float(best_fnum) - fnum_target) > fnum_tol:
+            is_ood = True
+    fallback = is_ood  # 复用下游 warning 生成逻辑
 
     results_list = []
     for rank, (rms, m) in enumerate(candidates, 1):
         results_list.append({
-            "rank": rank, "id": m.get('lens_idx'),
-            "rms": round(rms, 4), "fov": m.get('fov'),
-            "fnum": m.get('fnum'), "effl": round(m.get('calc_effl', 0), 2)
+            "rank": rank, "id": m.get("lens_idx"),
+            "rms": round(rms, 4), "fov": m.get("fov"),
+            "fnum": m.get("fnum"), "effl": round(m.get("calc_effl", 0), 2),
         })
 
     out = {"results": results_list}
@@ -314,7 +337,7 @@ def rank_by_rms(query: str) -> str:
         effl_hint_str = "、".join(effl_hints) if effl_hints else "未知"
         out["warning"] = (
             f"⚠ 数据库中无FOV≈{fov_target}° F/{fnum_target}的精确匹配。【禁止继续检索，必须直接用上方返回的镜头作为起点开始优化】\n"
-            f"返回镜头EFFL: {effl_hint_str}（EFFL差距再大也没关系，可等比缩放）\n"
+            f"返回镜头EFFL: {effl_hint_str}（缩放比例需在 0.25~4.0 之间，否则 align_effl 会拒绝）\n"
             f"\n{RETRIEVAL_SKILL_SUMMARY}\n"
             f"下一步【必须按顺序执行】：\n"
             f"1. 【必须】先调用align_effl将EFFL缩放到目标值\n"
@@ -348,21 +371,35 @@ def get_lens_surfaces(lens_idx: str) -> str:
     if isinstance(surfs, str):
         surfs = ast.literal_eval(surfs)
 
-    # 只返回玻璃面，跳过空气面，压缩token
-    glass_surfs = []
-    for s in surfs:
-        mat = str(s.get("material","AIR")).upper()
-        if mat not in ("AIR","") and s.get("radius") is not None:
-            r = s.get("radius")
-            glass_surfs.append({
-                "s": int(s.get("surface_num",0)),
-                "r": round(r, 3) if abs(r) < 1e7 else None,
-                "t": round(s.get("thickness",0), 3),
-                "m": s.get("material","")
-            })
+    # 返回所有面（含 AIR 面/光阑面），加 semi_diameter 字段
+    # AIR + r≈∞ + sd局部最小 = 光阑面（Skill 13 识别规则）
+    all_surfs = []
+    for i, s in enumerate(surfs):
+        if i == 0 or i == len(surfs) - 1:
+            continue  # 跳过 OBJ 和 IMA
+        r = s.get("radius", 0)
+        sd = s.get("semi_diameter", 0)
+        entry = {
+            "s": int(s.get("surface_num", i)),
+            "r": round(float(r), 3) if abs(float(r)) < 1e7 else "inf",
+            "t": round(float(s.get("thickness", 0)), 3),
+            "sd": round(float(sd), 3) if sd else 0,
+            "m": s.get("material", "AIR"),
+        }
+        all_surfs.append(entry)
+
+    # 自动识别光阑面（r≈∞ + AIR + sd 最小）
+    stop_candidates = [s for s in all_surfs
+                       if s["r"] == "inf" and s["m"] == "AIR"]
+    stop_surf = None
+    if stop_candidates:
+        stop_surf = min(stop_candidates, key=lambda x: x["sd"])["s"]
+
     return json.dumps({
-        "id": lens_idx, "fov": lens.get('fov'), "fnum": lens.get('fnum'),
-        "n_surf": len(surfs), "glass": glass_surfs
+        "id": lens_idx, "fov": lens.get("fov"), "fnum": lens.get("fnum"),
+        "n_surf": len(surfs),
+        "stop_surface": stop_surf,  # 光阑面编号（Skill 13 直接用此字段）
+        "surfaces": all_surfs,
     }, ensure_ascii=False)
 
 
@@ -438,12 +475,77 @@ def modify_lens(input_str: str) -> str:
             new_val = float(value_raw)
         except ValueError:
             return f"参数 {param} 需要数值，收到: {value_raw!r}"
+
+        # 护栏：semi_diameter 修改必须符合光学常识
+        if param == "semi_diameter":
+            old_sd = float(target.get("semi_diameter", 0))
+            if old_sd > 0:
+                ratio = new_val / old_sd
+                if ratio < 0.5:
+                    return (f"⚠ 拒绝修改：semi_diameter 从 {old_sd:.2f} 缩到 {new_val:.2f}（比例{ratio:.2f}）\n"
+                            f"若想降低 Fnum，应该扩大 semi_diameter，value 应是 {old_sd:.2f} × (当前Fnum/目标Fnum)\n"
+                            f"例：当前Fnum=2.7 目标=1.4 → value = {old_sd:.2f} × (2.7/1.4) = {old_sd * 2.7/1.4:.2f}")
+                if ratio > 3.0:
+                    return (f"⚠ 拒绝修改：semi_diameter 扩大比例 {ratio:.2f} 过大（>3倍），可能撞其他透镜。分两步逐步扩。")
         target[param] = new_val
+
+        # ★ 若修改的是光阑面的 semi_diameter，同步更新 lens["fnum"]（按反比例）
+        # 光阑识别：r≈∞ + AIR + sd 局部最小（和 get_lens_surfaces 一致）
+        if param == "semi_diameter":
+            try:
+                _optics = surfs[1:-1] if len(surfs) >= 3 else surfs
+                _stops = [(s.get("surface_num", i+1), float(s.get("semi_diameter", 0)))
+                          for i, s in enumerate(_optics)
+                          if abs(float(s.get("radius", 0))) > 1e7
+                          and str(s.get("material", "AIR")).upper() == "AIR"
+                          and float(s.get("semi_diameter", 0)) > 0]
+                if _stops:
+                    _stop_snum = min(_stops, key=lambda x: x[1])[0]
+                    if int(surface_id) == int(_stop_snum):
+                        # 改的就是光阑面！按比例更新 fnum
+                        _cur_fnum = float(lens.get("fnum", 0))
+                        if _cur_fnum > 0 and old_sd > 0:
+                            _new_fnum = _cur_fnum * (old_sd / new_val)
+                            lens["fnum"] = round(_new_fnum, 3)
+                            print(f"[modify_lens] 光阑 sd {old_sd:.2f}→{new_val:.2f}, Fnum {_cur_fnum:.2f}→{_new_fnum:.2f}")
+            except Exception as _e:
+                print(f"[modify_lens] Fnum 同步更新失败: {_e}")
     elif param == "material":
         new_val = value_raw
+        # 校验材料是否在玻璃库
+        try:
+            import optical_calculator as _oc
+            if hasattr(_oc, "GlassDB") or hasattr(_oc, "_GLASS_DB"):
+                # 简单试调 _calc 看是否会 "Unknown material"
+                _test_lens = copy.deepcopy(lens)
+                _test_surfs = _test_lens.get("surfaces", [])
+                if isinstance(_test_surfs, str):
+                    _test_surfs = ast.literal_eval(_test_surfs)
+                for _s in _test_surfs:
+                    if int(_s.get("surface_num", -1)) == int(surface_id):
+                        _s["material"] = new_val
+                        break
+                _test_lens["surfaces"] = _test_surfs
+                _r = _calc(_test_lens)
+                if not _r.get("valid") and "Unknown material" in str(_r.get("msg", "")):
+                    return f"⚠ 拒绝修改：材料 {new_val!r} 不在玻璃库。请换候选镜头，或用有效 CDGM 牌号（如 H-ZLAF55D、H-FK61、H-LAK52 等）"
+        except Exception:
+            pass
         target["material"] = new_val
     else:
         return f"不支持的参数: {param}，可选: radius / thickness / material / semi_diameter"
+
+    # 轨迹记录（self-evolve）
+    try:
+        _r_after = _calc(lens)
+        record_step("modify_lens", lens_idx,
+                    {"surface": surface_id, "param": param,
+                     "old": old_val, "new": new_val},
+                    metrics_before=None,
+                    metrics_after={"rms":  _r_after.get("rms"),
+                                   "effl": _r_after.get("effl")})
+    except Exception:
+        pass
 
     return (
         f"✓ 镜头#{lens_idx} 面{surface_id} {param} 修改成功\n"
@@ -593,7 +695,7 @@ def align_effl(input_str: str) -> str:
 
     # 放缩比例限制：超过 ±30% 警告，超过 ±60% 拒绝
     scale_pct = abs(scale - 1.0) * 100
-    if scale_pct > 85:
+    if scale_pct > 300:
         return (f"⚠ 放缩比例过大（{scale:.3f}，偏差{scale_pct:.0f}%），拒绝执行。"
                 f"当前EFFL={current_effl:.2f}mm，目标={target_effl}mm，差距过大，"
                 f"镜头结构不适合此目标EFFL，建议重新检索更接近的起始镜头。")
@@ -620,8 +722,18 @@ def align_effl(input_str: str) -> str:
     r2 = _calc(lens)
     if r2.get("valid"):
         warn = ""
-        if scale_pct > 30:
+        if scale_pct > 150:
             warn = f"  ⚠ 放缩比例较大({scale:.3f})，建议验证后再优化。\n"
+
+        # 轨迹记录
+        try:
+            record_step("align_effl", lens_idx,
+                        {"target_effl": target_effl, "scale": round(scale, 4)},
+                        {"rms": r.get("rms"),  "effl": current_effl},
+                        {"rms": r2.get("rms"), "effl": r2.get("effl")})
+        except Exception:
+            pass
+
         return ("✓ 镜头#" + str(lens_idx) + " EFFL预对齐完成\n" +
                 "  缩放比例: " + f"{scale:.4f}" + f" (偏差{scale_pct:.0f}%)" + "\n" +
                 warn +
@@ -688,6 +800,16 @@ def random_restart(input_str: str) -> str:
 
     # 重置停滞计数器，允许重新优化
     _OPTIMIZE_STALL[lens_idx] = 0
+
+    # 轨迹记录
+    try:
+        record_step("random_restart", lens_idx,
+                    {"strength": strength, "n_perturbed": len(perturbed)},
+                    None,
+                    {"rms": r2.get("rms") if r2.get("valid") else None,
+                     "effl": r2.get("effl") if r2.get("valid") else None})
+    except Exception:
+        pass
 
     return f"扰动完成#{lens_idx} 扰动后RMS:{rms_str} 继续local_optimize或若变差则reset_lens"
 
@@ -824,6 +946,17 @@ def split_lens(input_str: str) -> str:
     r_check = _calc(lens)
     rms_str  = f"{r_check['rms']:.6f} mm" if r_check.get("valid") else f"追迹失败: {r_check.get('msg')}"
     effl_str = f"{r_check['effl']:.4f} mm" if r_check.get("valid") else "N/A"
+
+    # 轨迹记录
+    try:
+        record_step("split_lens", lens_idx,
+                    {"surface": surface_id, "ratio": ratio,
+                     "r1": round(r1, 3), "r2": round(r2, 3)},
+                    None,
+                    {"rms":  r_check.get("rms")  if r_check.get("valid") else None,
+                     "effl": r_check.get("effl") if r_check.get("valid") else None})
+    except Exception:
+        pass
 
     return ("✓ 镜头#" + str(lens_idx) + " 面" + str(surface_id) + " 拆分完成\n" +
             "  前片 radius=" + f"{r1:.3f}" + " mm  thickness=" + f"{t1:.3f}" + " mm  材料=" + str(orig["material"]) + "\n" +
@@ -1010,6 +1143,16 @@ def local_optimize(input_str: str) -> str:
     else:
         _OPTIMIZE_STALL[stall_key] = 0  # 有改善则重置
 
+    # 轨迹记录
+    try:
+        record_step("local_optimize", lens_idx,
+                    {"iterations": iterations, "lr": lr,
+                     "n_changes": len(changes)},
+                    {"rms": rms_init,  "effl": effl_init},
+                    {"rms": rms_final, "effl": effl_final})
+    except Exception:
+        pass
+
     return f"优化完成#{lens_idx} RMS:{rms_init:.4f}→{rms_final:.4f}mm 改善{improvement:.0f}% EFFL:{effl_final:.2f}mm"
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1036,6 +1179,13 @@ TOTR超限 → 最大空气间隔thickness减小10%
 ======================"""
 
 SYSTEM_PROMPT = """/no_think
+
+【全局规则 - 优先阅读】
+- 用户给出 FOV/F# 数值需求时，**必须用 rank_by_rms，禁止用 lens_search**
+  （lens_search 是语义检索，不按数值距离排序；rank_by_rms 才按数值距离找最接近的）
+- 遇到 "Unknown material" 错误不要重复改材料，直接换候选镜头
+
+
 你是光学镜头设计专家（CDGM玻璃库）。流程：①lens_search检索→②rms_calculator评估→③未达标则modify_lens优化，最多6次。
 优化步骤（严格按顺序执行）：
 Step0 若用户已明确给出FOV和F数（如"FOV=150度 F/1.2"），【跳过interpret_requirement】，直接进Step0b；若用户未给出FOV/F数等参数→先调用interpret_requirement翻译需求
@@ -1048,7 +1198,28 @@ Step4 若仍未达标：modify_lens换材料（色差→H-FK61/H-FK71正镜+H-ZF
 优化策略索引（识别症状后调用get_skill_detail获取详细操作）：
 {skill_index}
 Step5 rms_calculator验证；若local_optimize返回"改善0.0%"→立即停止重复调用，改用random_restart(strength=0.05)扰动后再跑一次local_optimize；若仍0.0%改善→直接输出Final Answer
+Step6 【关键】完成近轴优化后必须调 check_spec 做硬达标判定，格式：
+      check_spec(lens_idx=X, target_effl=<用户目标mm>, target_fnum=<用户目标F数>, rms_pass=1.0)
+      - 返回 pass=true → 直接调 zemax_optimize 进精优，然后 zemax_layout 出图，输出 Final Answer
+      - 返回 pass=false → 按 reasons 提示继续（EFFL差→align_effl；RMS差→local_optimize；F#差→换候选镜头）
+      - 同一镜头 check_spec 连续失败 3 次 → 直接输出 Final Answer
+      【禁止】不调 check_spec 就直接输出 Final Answer；不经 check_spec 放行就 zemax_optimize
 只用CDGM牌号(H-/D-)，禁止N-BK7等肖特牌号。
+
+Step7 【F# 偏大时改光阑扩张入瞳，禁止换候选】
+当 check_spec 报 "F#=X vs 目标Y 偏大" 且 infeasible 为空时：
+  1) 调 get_skill_detail('Skill 13') 查"扩大入瞳降低 Fnum"（这是 F# 优化主路径）
+  2) 按 Skill 13 操作：
+     a) get_lens_surfaces 拿到所有面
+     b) 识别光阑面（radius 近无穷 + material=AIR + semi_diameter 局部最小）
+     c) modify_lens(surface=<光阑面>, param=semi_diameter, value=<原值×当前Fnum/目标Fnum>)
+     d) local_optimize 重优化（扩光阑会引入球差，必须重优化）
+     e) check_spec 验证 Fnum 是否降到目标
+  3) 若 RMS 爆炸（>1mm），调 get_skill_detail('Skill 2') 查换高折射率玻璃方案，再 modify_lens(param=material)
+  4) 同一候选最多执行 Step7 两轮；两轮仍未达标再换下一候选
+  5) 所有候选都试完仍未达标 → Final Answer 明确写"未达标✗"（禁止写"以最近邻代替"）
+若 infeasible 非空（FOV 差距>50%）→ 跳过结构修改，直接换候选或 Final Answer 报未达标
+【严禁】F# 偏大时只改 surface=1 的 material/radius——那对 Fnum 无影响！必须改光阑面的 semi_diameter。
 
 工具列表：
 {tools}
@@ -1079,8 +1250,15 @@ Thought:{agent_scratchpad}"""
 from skill_summaries import SKILL_SUMMARIES
 
 def build_skill_index_text():
+    # 合并手工 skill + 自进化学到的 skill
+    merged = dict(SKILL_SUMMARIES)
+    try:
+        learned = load_learned_for_prompt()  # {name: summary}
+        merged.update(learned)
+    except Exception:
+        pass
     lines = ["===== 优化策略索引（识别症状后调用get_skill_detail获取详情）====="]
-    for name, summary in SKILL_SUMMARIES.items():
+    for name, summary in merged.items():
         lines.append(f"・{name}：{summary}")
     lines.append("如需详细操作步骤，调用: get_skill_detail(skill_name=\'策略名\')")
     lines.append("======================")
@@ -1104,6 +1282,13 @@ def get_skill_detail(skill_name: str) -> str:
         if detail:
             return detail
     except ImportError:
+        pass
+    # learned skills fallback（self-evolve 学到的）
+    try:
+        learned_detail = get_learned_detail(skill_name)
+        if learned_detail:
+            return learned_detail
+    except Exception:
         pass
     result = _fuzzy_get(SKILL_SUMMARIES, skill_name)
     return result if result else f"未找到策略: {skill_name}。请用完整名称，如'Skill 1: 利用高阿贝数低色散玻璃消除轴上色差'"
@@ -1143,11 +1328,13 @@ def get_retrieval_skill_detail(skill_name: str) -> str:
 # ══════════════════════════════════════════════════════════════════════════════
 import requests as _requests
 
-ZEMAX_BRIDGE = "http://127.0.0.1:5000"
+import os as _os_for_bridge
+ZEMAX_BRIDGE = _os_for_bridge.environ.get("ZEMAX_BRIDGE_URL", "http://127.0.0.1:5000")
+_NGROK_HEADERS = {"ngrok-skip-browser-warning": "true"}
 
 def _zemax_available():
     try:
-        r = _requests.get(f"{ZEMAX_BRIDGE}/status", timeout=3)
+        r = _requests.get(f"{ZEMAX_BRIDGE}/status", headers=_NGROK_HEADERS, timeout=3)
         return r.ok
     except Exception:
         return False
@@ -1183,13 +1370,13 @@ def zemax_layout(input_str: str) -> str:
 
     try:
         # 推送完整面型
-        _requests.post(f"{ZEMAX_BRIDGE}/load_lens",
+        _requests.post(f"{ZEMAX_BRIDGE}/load_lens", headers=_NGROK_HEADERS,
                        json={"surfaces": surfs,
                              "fov":  lens.get("fov"),
                              "fnum": lens.get("fnum")},
                        timeout=10)
         # 生成 layout 图
-        resp = _requests.post(f"{ZEMAX_BRIDGE}/layout", timeout=30)
+        resp = _requests.post(f"{ZEMAX_BRIDGE}/layout", headers=_NGROK_HEADERS, timeout=30)
         if not resp.ok:
             return f"Layout 生成失败: {resp.text}"
         with open(save_path, "wb") as f:
@@ -1232,13 +1419,13 @@ def zemax_optimize(input_str: str) -> str:
 
     try:
         # 推送完整面型
-        _requests.post(f"{ZEMAX_BRIDGE}/load_lens",
+        _requests.post(f"{ZEMAX_BRIDGE}/load_lens", headers=_NGROK_HEADERS,
                        json={"surfaces": surfs,
                              "fov":  lens.get("fov"),
                              "fnum": lens.get("fnum")},
                        timeout=10)
         # DLS 优化
-        resp = _requests.post(f"{ZEMAX_BRIDGE}/zemax_optimize",
+        resp = _requests.post(f"{ZEMAX_BRIDGE}/zemax_optimize", headers=_NGROK_HEADERS,
                               json={"cycles": cycles}, timeout=120)
         data = resp.json()
         if "error" in data:
@@ -1266,6 +1453,9 @@ def build_agent():
         get_skill_detail,  # 两级加载：按需拉取完整 skill
         get_retrieval_skill_detail,  # 检索策略详情：out-of-domain / EFFL偏差时按需调用
     ]
+    # self-evolve 的硬达标判断工具（step4）
+    if _HAS_SELF_EVOLVE:
+        tools.insert(11, check_spec)
     # 动态注入 skill_index（只注入 summary，节省 token）
     skill_index_text = build_skill_index_text()
     prompt = PromptTemplate.from_template(
@@ -1276,7 +1466,7 @@ def build_agent():
         agent=agent,
         tools=tools,
         verbose=True,
-        max_iterations=30,
+        max_iterations=50,
         handle_parsing_errors=True,
     )
 
@@ -1331,8 +1521,33 @@ def main():
         if not q or q.lower() in ("quit", "exit", "q"):
             break
         try:
+            # 清理每轮状态 + session 隔离
+            _SEARCH_COUNT.clear()
+            _MODIFY_COUNT.clear()
+            _OPTIMIZE_STALL.clear()
+            _LENS_BACKUP.clear()
+            global _INTERPRET_CALLED
+            _INTERPRET_CALLED = False
+            start_session(q)
+
             r = executor.invoke({"input": q})
             print(f"\n✅ {r['output']}\n")
+
+            # 蒸馏
+            if _HAS_SELF_EVOLVE:
+                try:
+                    from self_evolve import _SESSION_CTX
+                    last_chk = _SESSION_CTX.get("last_check", {})
+                    report = end_session(
+                        final_passed    = bool(last_chk.get("pass", False)),
+                        final_metrics   = {k: last_chk.get(k) for k in ("rms","effl","fnum")},
+                        gemini_api_key  = os.environ["GEMINI_API_KEY"],
+                        gemini_base_url = os.environ["GEMINI_BASE_URL"],
+                    )
+                    if report.get("appended"):
+                        print(f"[self_evolve] ✓ 新增 skill: {report['new_skill_name']}\n")
+                except Exception as e:
+                    print(f"[self_evolve] {e}\n")
         except Exception as e:
             print(f"❌ {e}\n")
 
@@ -1345,13 +1560,42 @@ _executor = None
 def run_agent(question: str) -> str:
     global VS, ALL_LENSES, _executor
     _SEARCH_COUNT.clear()
+    _MODIFY_COUNT.clear()
+    _OPTIMIZE_STALL.clear()
+    _LENS_BACKUP.clear()
     global _INTERPRET_CALLED
     _INTERPRET_CALLED = False
     if _executor is None:
         VS, ALL_LENSES = load_rag()
         _executor = build_agent()
+
+    # ★ self-evolve: session 开始
+    start_session(question)
+
     result = _executor.invoke({"input": question})
-    return result.get("output", "")
+    output = result.get("output", "")
+
+    # ★ self-evolve: session 结束，蒸馏轨迹 → 追加到 learned_skills.py
+    if _HAS_SELF_EVOLVE:
+        try:
+            from self_evolve import _SESSION_CTX
+            last_chk = _SESSION_CTX.get("last_check", {})
+            final_passed  = bool(last_chk.get("pass", False))
+            final_metrics = {k: last_chk.get(k) for k in ("rms", "effl", "fnum")}
+            report = end_session(
+                final_passed    = final_passed,
+                final_metrics   = final_metrics,
+                gemini_api_key  = os.environ["GEMINI_API_KEY"],
+                gemini_base_url = os.environ["GEMINI_BASE_URL"],
+            )
+            if report.get("appended"):
+                print(f"[self_evolve] ✓ 新增 skill: {report['new_skill_name']}")
+            elif report.get("trajectory_len", 0) >= 3:
+                print(f"[self_evolve] 未入库: {report.get('reason')}")
+        except Exception as e:
+            print(f"[self_evolve] 失败（不影响主流程）: {e}")
+
+    return output
 
 
 if __name__ == "__main__":
