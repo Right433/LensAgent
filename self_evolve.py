@@ -4,11 +4,11 @@ import os
 self_evolve.py
 ==============
 补齐 agent_zemax.py 的两个缺口：
-  ① step4 硬达标判断（check_spec）
-  ② step3 self-evolve：把本次 session 的 trajectory 蒸馏成新 skill，
+   step4 硬达标判断（check_spec）
+   step3 self-evolve：把本次 session 的 trajectory 蒸馏成新 skill，
      追加到 /gz-data/learned_skills.py，下次 run_agent 会加载进 prompt。
 
-集成到 agent_zemax.py 的四处（见 integration_patch.md）：
+集成到 agent_zemax.py 的四处：
   1. import: from self_evolve import check_spec, record_step, start_session, end_session
   2. 在 build_agent() 的 tools=[...] 里把 check_spec 加进去
   3. 在 modify_lens / align_effl / split_lens / local_optimize / random_restart 的
