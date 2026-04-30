@@ -1,20 +1,4 @@
-"""
-gen_benchmark.py
-=================
-生成 100 个光学设计 benchmark 用例（30% in-domain, 70% OOD）并写入 JSON。
-同时提供 run_eval_20() — 先跑现有 20 个测试集，生成 metrics + layout + zmx 路径汇总。
 
-用法:
-  # 生成 100 条 benchmark
-  python gen_benchmark.py --gen --out /gz-data/benchmark_100.json
-
-  # 在现有 20 条测试集上跑评估
-  python gen_benchmark.py --eval --cases /gz-data/ood_20cases.json \
-                          --session_dir /gz-data/results/eval_20
-
-  # 两步合并
-  python gen_benchmark.py --gen --eval ...
-"""
 
 import argparse, json, math, random, os, glob, time, sys
 from pathlib import Path
