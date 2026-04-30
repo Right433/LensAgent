@@ -4,11 +4,11 @@ import os
 self_evolve.py
 ==============
 补齐 agent_zemax.py 的两个缺口：
-   step4 硬达标判断（check_spec）
-   step3 self-evolve：把本次 session 的 trajectory 蒸馏成新 skill，
+  ① step4 硬达标判断（check_spec）
+  ② step3 self-evolve：把本次 session 的 trajectory 蒸馏成新 skill，
      追加到 /gz-data/learned_skills.py，下次 run_agent 会加载进 prompt。
 
-集成到 agent_zemax.py 的四处：
+集成到 agent_zemax.py 的四处（见 integration_patch.md）：
   1. import: from self_evolve import check_spec, record_step, start_session, end_session
   2. 在 build_agent() 的 tools=[...] 里把 check_spec 加进去
   3. 在 modify_lens / align_effl / split_lens / local_optimize / random_restart 的
@@ -51,12 +51,18 @@ def start_session(question: str, target_spec: dict | None = None) -> None:
 def record_step(tool_name: str,
                 lens_idx: int,
                 action: dict,
-                metrics_before: dict | None,
-                metrics_after: dict | None,
-                note: str = "") -> None:
+                metrics_before: dict | None = None,
+                metrics_after: dict | None = None,
+                note: str = "",
+                kind: str = "write") -> None:
     """
-    在每个修改类 tool 返回前调用。
+    记录一步轨迹。
     metrics_before/after 里关键字段：rms, effl, totr（单位 mm）。
+
+    kind:
+      "write"  — 写入型（修改镜头面型），需要 before/after
+      "read"   — 读取型（rms_calculator / get_lens_surfaces），只填 action.observed
+      "decide" — 决策型（rank_by_rms / check_spec），记录 input→pick/pass/fail
     """
     delta_rms = None
     if metrics_before and metrics_after \
@@ -67,6 +73,7 @@ def record_step(tool_name: str,
     _TRAJECTORY.append({
         "t": len(_TRAJECTORY) + 1,
         "tool": tool_name,
+        "kind": kind,
         "lens_idx": lens_idx,
         "action": action,
         "before": metrics_before,
@@ -143,6 +150,18 @@ def check_spec(input_str: str) -> str:
 
     passed = len(reasons) == 0
 
+    # ─── 不可达检测：F# 偏差>30% 或 FOV 偏差>50% 标 infeasible ───
+    import re as _re
+    infeasible = []
+    for _reason in reasons:
+        _m = _re.search(r'偏差([\d.]+)%', _reason)
+        if not _m:
+            continue
+        _dev = float(_m.group(1))
+        if 'F#' in _reason and _dev > 30:
+            infeasible.append(f'F#差距{_dev:.0f}%超出local_optimize能力,需换候选')
+        elif 'FOV' in _reason and _dev > 50:
+            infeasible.append(f'FOV差距{_dev:.0f}%需换结构,无法通过优化修复')
 
     # 基于失败原因给 agent 下一步提示
     if passed:
@@ -159,6 +178,7 @@ def check_spec(input_str: str) -> str:
         "lens_idx": lens_idx, "pass": passed,
         "rms": rms, "effl": effl_cur, "fnum": fnum_cur,
         "reasons": reasons,
+        "source": "paraxial_check_spec",
     }
     # 同时把 target 记下来（蒸馏时需要）
     if target_effl:  _SESSION_CTX.setdefault("target_spec", {})["effl"] = target_effl
@@ -168,6 +188,21 @@ def check_spec(input_str: str) -> str:
     # infeasible 时覆盖 next，强制 agent 换候选或 Final Answer
     if infeasible:
         nxt = "try_next_candidate_or_final_answer"
+
+    # ★ self-evolve: 记录 check_spec 决策
+    try:
+        record_step("check_spec", lens_idx,
+                    {"target_effl": target_effl, "target_fnum": target_fnum,
+                     "pass": passed,
+                     "rms_paraxial": round(rms, 4),
+                     "effl_cur": round(effl_cur, 2),
+                     "fnum_cur": fnum_cur,
+                     "reasons": reasons,
+                     "next": nxt,
+                     "note": "近轴追迹(F/1.2 大孔径下与真值可差 >10x)"},
+                    kind="decide")
+    except Exception:
+        pass
 
     return json.dumps({
         "pass": passed,
@@ -186,25 +221,39 @@ def _should_distill(final_passed: bool) -> bool:
     if len(_TRAJECTORY) < MIN_TRAJ_LEN:
         return False
 
-    # 情况 A：成功 session 且累计 RMS 改善够大
-    if final_passed:
-        gain = sum(s["delta_rms"] for s in _TRAJECTORY if s.get("delta_rms") is not None)
-        if gain > MIN_RMS_GAIN:
-            return True
-
-    # 情况 B：用到了罕见工具（split_lens / random_restart），信号价值高
+    zemax_ran    = any(s["tool"] == "zemax_optimize" for s in _TRAJECTORY)
+    zemax_passed = any(
+        s["tool"] == "zemax_optimize"
+        and (s.get("action") or {}).get("zemax_pass") is True
+        for s in _TRAJECTORY
+    )
     rare = {"split_lens", "random_restart"}
+
+    # ── A：成功 session 跑了 Zemax（最常见有价值路径）────────────────────────
+    if final_passed and zemax_ran:
+        return True
+
+    # ── B：用到了罕见工具 ──────────────────────────────────────────────────────
     if rare & {s["tool"] for s in _TRAJECTORY}:
         return True
-    # 情况 B2: 成功 session 中改了光阑面 semi_diameter（Fnum 优化成功，高价值信号）
+
+    # ── C：光阑 SD 被修改（F# 调整，无论成败）────────────────────────────────
     sd_modified = any(
         s["tool"] == "modify_lens" and s["action"].get("param") == "semi_diameter"
         for s in _TRAJECTORY
     )
-    if final_passed and sd_modified:
+    if sd_modified:
         return True
 
-    # 情况 C：有过达标失败，且轨迹包含换材料动作（对"哪种材料在哪种症状下无效"有信息量）
+    # ── D：OOD 起点 + Zemax 真值达标 ─────────────────────────────────────────
+    ood_start = any(
+        s["tool"] == "rank_by_rms" and (s.get("action") or {}).get("is_ood") is True
+        for s in _TRAJECTORY
+    )
+    if ood_start and zemax_passed:
+        return True
+
+    # ── E：失败 + 材料被修改（负向经验：哪种策略无效）────────────────────────
     materials_changed = any(
         s["tool"] == "modify_lens" and s["action"].get("param") == "material"
         for s in _TRAJECTORY
@@ -212,23 +261,51 @@ def _should_distill(final_passed: bool) -> bool:
     if (not final_passed) and materials_changed:
         return True
 
+    # ── F：★ EFFL 严重不匹配导致失败（新增）────────────────────────────────
+    # 捕获「RAG 镜头 EFFL 与目标偏差 >30%，优化失败」→ 教 agent 先 align_effl
+    effl_mismatch_fail = any(
+        s["tool"] == "zemax_optimize"
+        and (s.get("action") or {}).get("zemax_pass") is False
+        and (s.get("action") or {}).get("effl_mismatch_pct", 0) > 30
+        for s in _TRAJECTORY
+    )
+    if (not final_passed) and effl_mismatch_fail:
+        return True
+
     return False
 
 
 def _compact_trajectory() -> list:
-    """给 Gemini 的精简轨迹。"""
+    """
+    给 Gemini 的精简轨迹。按 kind 分别渲染:
+      - write:  完整 before→after + delta_rms
+      - decide: 决策意图 + 关键观察 (is_ood / pass / selected_id)
+      - read:   只保留最重要的 observation (如 rms_calculator 的 rms)
+    """
     out = []
     for s in _TRAJECTORY:
+        kind = s.get("kind", "write")
         b = s.get("before") or {}
         a = s.get("after") or {}
-        out.append({
-            "step":   s["t"],
-            "tool":   s["tool"],
-            "action": s["action"],
-            "rms":    f"{b.get('rms','?')}→{a.get('rms','?')}",
-            "effl":   f"{b.get('effl','?')}→{a.get('effl','?')}",
-            "delta_rms": (round(s["delta_rms"], 4) if s.get("delta_rms") is not None else None),
-        })
+        entry = {"step": s["t"], "tool": s["tool"], "kind": kind}
+
+        if kind == "write":
+            entry["action"] = s.get("action")
+            entry["rms"]    = f"{b.get('rms','?')}→{a.get('rms','?')}"
+            entry["effl"]   = f"{b.get('effl','?')}→{a.get('effl','?')}"
+            if s.get("delta_rms") is not None:
+                entry["delta_rms"] = round(s["delta_rms"], 4)
+        elif kind == "decide":
+            # 决策型:action 里就带关键观察(picked_id / is_ood / pass / reasons)
+            entry["decision"] = s.get("action")
+        else:  # read
+            # 读取型:只保留 action 里最小信息量
+            entry["observed"] = s.get("action")
+
+        note = s.get("note")
+        if note:
+            entry["note"] = note
+        out.append(entry)
     return out
 
 
@@ -239,15 +316,56 @@ DISTILL_PROMPT = """你是光学设计专家，判断本次 Agent session 是否
 最终达标: {final_passed}
 最终指标: {final_metrics}
 
-本次轨迹（时间顺序）:
+本次轨迹（时间顺序，按 kind 分类）:
+  - kind="decide": 决策型步骤(rank_by_rms 选候选 / check_spec 判达标)。action 字段内带决策结果
+  - kind="write":  写入型步骤(modify_lens / align_effl / zemax_optimize 等)。有 before/after rms 对比
+  - kind="read":   读取型步骤(rms_calculator / get_lens_surfaces)。只有 observed 观察值
+
 {trajectory}
+
+【光学物理参照系——判断 skill 是否真正新颖时的对照基准】
+以下是已知的光学设计常识，Gemini 归纳时应以此为参照，
+只有超出以下常识范围的路径才算"真正新颖"值得入库：
+
+像差因果（常识，不单独入库）：
+  • 球差大 → 正镜曲率强或孔径大；换高nd正镜或拆分强弯面
+  • 场曲大 → Petzval和过大；负镜换高nd(>1.78)，正镜换低nd(<1.55)
+  • 轴上色差 → 正镜Vd不足；换H-FK61(Vd=70)/H-FK71(Vd=84)消色差
+  • 倍率色差 → 光阑偏离主组；Vd差需>20才能有效消色差
+  这些是教科书级常识，若本次 session 只做了以上操作，无需入库。
+
+玻璃选型（常识，不单独入库）：
+  • 消色差：正镜高Vd(>60) + 负镜低Vd(<30)，Vd差>40最佳
+  • 场曲：负镜nd要>正镜nd，nd差>0.15效果显著
+  • CDGM替换：非H-*/D-*牌号按nd最近邻换，ΔEFFL<5%可不对齐
+
+结构约束（常识，不单独入库）：
+  • 玻璃最小厚度=max(0.8mm, SD×8%)；空气间隔>0.3mm
+  • stop_SD = EFFL/(2×F#)；偏差>10%需手动调
+  • FOV>60°需≥6片；F#<2.0需≥5片
+
+值得入库的情况（超出以上常识的新发现）：
+  ★ 特定OOD参数组合（如FOV=58°+F/1.8）的具体成功路径
+  ★ 某种玻璃组合在特定FOV/F#范围内的实测收敛规律
+  ★ 非常规的操作顺序（如先random_restart再换候选）取得成功
+  ★ 极端参数下（EFFL缩放>2×，SD扩大>2×）的修复策略
+  ★ 物理修复（auto_fix_physics）发现并修复了影响收敛的结构问题
 
 【已有 skill 列表（手写 + 已学到）】：
 {existing_skills}
 
-判断规则（**严格执行**）：
+判断规则（**严格执行**，优先级从高到低）：
 
-1. **基线操作不入库**：仅靠 align_effl + local_optimize + check_spec 且所有参数在常规范围内 → 返回 {{}}
+0. **必须入库的情况（优先级最高，满足任一条直接入库，不受第1条限制）**：
+   - zemax_optimize 出现且 merit_delta/merit_before > 0.5（merit 改善 >50%）→ **必须入库**
+   - 轨迹中有 modify_lens 且 param=semi_diameter（扩/缩光阑调 F#）→ **必须入库**
+   - rank_by_rms 的 decision 里 is_ood=true，或者 top20 Fnum 与 target_fnum 不完全匹配（OOD 起点）→ **必须入库**
+   - 换了候选镜头（轨迹中出现多个不同 lens_idx）且最终 final_passed=True → **必须入库**
+
+1. **基线操作不入库**（仅当第0条一项都不满足时才执行此条）：
+   轨迹工具集合是 {{rank_by_rms, check_spec, zemax_optimize}} 的子集，
+   且 zemax_optimize 的 merit_delta/merit_before ≤ 0.5，
+   且无光阑修改、无换候选、无 OOD → 返回 {{}}
 
 2. **去重（工具组合+参数范围都要比）**：
    - 如果 tool 序列和已有 skill 相同，**还要比较参数范围**
@@ -263,9 +381,16 @@ DISTILL_PROMPT = """你是光学设计专家，判断本次 Agent session 是否
 
 4. **OOD/跨域泛化是高价值信号**：
    - 当 target_spec 远离数据库分布（如极端 FOV、F#、EFFL 组合），且 final_passed=True
+   - 轨迹里 rank_by_rms 的 decision 字段若 is_ood=true,说明起点就是 OOD
    - 归纳"如何在数据库没覆盖的规格上硬搞出解"，这种 skill 比常规技巧价值更高
 
-5. **真正新的动作组合才入库**：基于上述规则判断，不重复也非常规才入库
+5. **zemax_optimize 的真值优化路径** (kind=write, tool=zemax_optimize):
+   - 若 action.zemax_pass=True 且 merit_delta/merit_before > 0.5 (merit 改善 >50%),
+     说明 DLS 对该候选结构的收敛能力强,值得记录"什么起点 → 什么结果"的经验
+   - 特别是 F# 被修改(zemax_pre_fnum ≠ zemax_post_fnum)后仍然真值达标的,
+     说明 OOD 扩光阑后 Zemax 也能兜住
+
+6. **真正新的动作组合才入库**：基于上述规则判断，不重复也非常规才入库
 
 若入库，严格返回 JSON（不加 markdown fence）:
 {{
@@ -290,11 +415,19 @@ def distill_session(final_passed: bool,
                     final_metrics: dict,
                     gemini_api_key: str,
                     gemini_base_url: str,
-                    gemini_model: str = os.environ.get("GEMINI_MODEL_DISTILL", "gemini-3.1-pro-preview")) -> dict | None:
+                    gemini_model: str = os.environ.get("GEMINI_MODEL_DISTILL", os.environ.get("GEMINI_MODEL_SELECT", "gemini-3-flash-preview"))) -> dict | None:
     """让 Gemini 归纳，返回新 skill dict 或 None。"""
     import sys
     print(f"[self_evolve] distill_session ENTER (model={gemini_model})", file=sys.stderr)
-    if not _should_distill(final_passed):
+    print(f"[self_evolve] trajectory_len={len(_TRAJECTORY)} final_passed={final_passed}", file=sys.stderr, flush=True)
+    _should = _should_distill(final_passed)
+    print(f"[self_evolve] _should_distill={_should}", file=sys.stderr, flush=True)
+    if not _should:
+        # 打印具体原因
+        import sys as _sys3
+        gain = sum(s["delta_rms"] for s in _TRAJECTORY if s.get("delta_rms") is not None)
+        zemax_ran = any(s["tool"] == "zemax_optimize" for s in _TRAJECTORY)
+        print(f"[self_evolve] skip reason: gain={gain:.4f} zemax_ran={zemax_ran} traj_len={len(_TRAJECTORY)}", file=_sys3.stderr, flush=True)
         return None
 
     # 加载已有 skill 列表（learned + 手写）供 Gemini 去重
@@ -329,11 +462,14 @@ def distill_session(final_passed: bool,
         import sys as _sys
         from openai import OpenAI
         print("[self_evolve]   -> calling Gemini ...", file=_sys.stderr, flush=True)
-        cli = OpenAI(api_key=gemini_api_key, base_url=gemini_base_url)
+        # ★ FIX: fallback 到 rank_by_rms 使用的 novaiapi key（当 .env 未设置时）
+        _api_key  = gemini_api_key or os.environ.get("GEMINI_API_KEY", "sk-uwMXbGBi2LKb9EnmGIOQT1QOISpA8jgazzvXwVLq5o5h79WZ")
+        _base_url = gemini_base_url or os.environ.get("GEMINI_BASE_URL", "https://us.novaiapi.com/v1")
+        cli = OpenAI(api_key=_api_key, base_url=_base_url)
         resp = cli.chat.completions.create(
             model=gemini_model,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=3000,
+            max_tokens=8000,
         )
         _msg = resp.choices[0].message
         _content = _msg.content or ""
@@ -348,8 +484,15 @@ def distill_session(final_passed: bool,
         text = _content.strip()
         print(f"[self_evolve]   <- Gemini returned ({len(text)} chars)", file=_sys.stderr, flush=True)
         print(f"[self_evolve]   raw[:200]: {text[:200]!r}", file=_sys.stderr, flush=True)
+        # 先剥 markdown 代码块
         text = re.sub(r"^```(?:json)?\s*", "", text)
         text = re.sub(r"\s*```$", "", text).strip()
+        # Gemini 有时在 JSON 前输出推理文字，用正则提取第一个完整 {...} 块
+        _m = re.search(r"\{[\s\S]*\}", text)
+        if not _m:
+            print("[self_evolve]   -> 返回文本中找不到 JSON 对象", file=_sys.stderr, flush=True)
+            return None
+        text = _m.group(0)
         obj = json.loads(text)
         if not obj or "name" not in obj or "full" not in obj:
             print(f"[self_evolve]   -> empty/missing keys, keys={list(obj.keys()) if isinstance(obj, dict) else type(obj).__name__}", file=_sys.stderr, flush=True)
@@ -438,7 +581,7 @@ def end_session(final_passed: bool,
                 final_metrics: dict,
                 gemini_api_key: str,
                 gemini_base_url: str,
-                gemini_model: str = os.environ.get("GEMINI_MODEL_DISTILL", "gemini-3.1-pro-preview")) -> dict:
+                gemini_model: str = os.environ.get("GEMINI_MODEL_DISTILL", os.environ.get("GEMINI_MODEL_SELECT", "gemini-3-flash-preview"))) -> dict:
     """run_agent 收尾时调用。返回这次 session 的蒸馏摘要。"""
     report = {
         "trajectory_len": len(_TRAJECTORY),
@@ -448,6 +591,13 @@ def end_session(final_passed: bool,
         "new_skill_name": None,
         "reason":         "",
     }
+    # ★ FIX: gemini_api_key/base_url 缺失时给出明确提示，不再静默吞错
+    if not gemini_api_key:
+        import sys as _sys2
+        print("[self_evolve] ⚠ gemini_api_key 为空，使用 novaiapi 内置 key", file=_sys2.stderr)
+    if not gemini_base_url:
+        import sys as _sys2
+        print("[self_evolve] ⚠ gemini_base_url 为空，使用 novaiapi 内置 base_url", file=_sys2.stderr)
     new_skill = distill_session(
         final_passed, final_metrics,
         gemini_api_key, gemini_base_url, gemini_model,
