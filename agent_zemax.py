@@ -917,13 +917,11 @@ def interpret_requirement(description: str) -> str:
 
 @tool
 def align_effl(input_str: str) -> str:
-    """按比例缩放整个系统以对齐 EFFL。输入: "lens_idx=X, target_effl=V"。偏差>85%会拒绝。"""
+    """按比例缩放整个系统以对齐 EFFL。输入: "lens_idx=X, target_effl=V"。偏差>300%会硬拒绝;>150% 仅警告。"""
     global _NO_EFFL_ALIGN
     import builtins as _bt
     if _NO_EFFL_ALIGN or getattr(_bt, "_ABLATION_NO_EFFL", False):
         return "⚠ align_effl 已禁用（消融实验 w/o EFFL Align）。请直接用 zemax_optimize 优化，不对齐EFFL。"
-    if _NO_EFFL_ALIGN:
-        return "⚠ align_effl 已禁用（消融实验 w/o EFFL Align）。请跳过此步骤，直接用 zemax_optimize 优化。"
     try:
         input_str = str(input_str).strip().strip(chr(34)).strip(chr(39))
         parts = {}
@@ -976,7 +974,6 @@ def align_effl(input_str: str) -> str:
     scale = target_effl / current_effl
 
     # 放缩比例限制：超过 150% 时输出警告，超过 300%（即 4× 或 ×0.25）时拒绝执行。
-    # docstring 中的"偏差>85%"描述的是建议重检索的经验值，非硬拒绝线。
     scale_pct = abs(scale - 1.0) * 100
     if scale_pct > 300:
         return (f"⚠ 放缩比例过大（{scale:.3f}，偏差{scale_pct:.0f}%），拒绝执行。"
@@ -2849,6 +2846,18 @@ def zemax_optimize(input_str: str) -> str:
         elif cycles > 50:
             cycles = 50
 
+    # ★ BUGFIX: lens 取出 + 越界检查 必须在 _zemax_available() 检查【之前】完成。
+    # 原版顺序是 zemax_available → lens 取出，导致离线分支里 lens.get(...) 抛 NameError，
+    # 被外层 try 静默吞掉，"Zemax 离线时也写入 record_step" 的逻辑实际从未生效。
+    if lens_idx < 0 or lens_idx >= len(ALL_LENSES):
+        return f"lens_idx {lens_idx} 越界（共 {len(ALL_LENSES)} 条）"
+
+    lens  = ALL_LENSES[lens_idx]
+    surfs = lens.get("surfaces", [])
+    if isinstance(surfs, str):
+        import ast as _ast
+        surfs = _ast.literal_eval(surfs)
+
     if not _zemax_available():
         # ★ FIX Bug2: Zemax 离线时把 check_spec 的达标结论同步到 session，
         # 避免 end_session 里 final_passed 被默认 False 覆盖，导致近轴达标会话被误判失败。
@@ -2877,15 +2886,6 @@ def zemax_optimize(input_str: str) -> str:
             except Exception as _rs_err:
                 print(f"[zemax_optimize] offline record_step 失败: {_rs_err}", flush=True)
         return "Zemax桥接服务不可用，请确认Windows端 zemax_bridge.py 已启动"
-
-    if lens_idx < 0 or lens_idx >= len(ALL_LENSES):
-        return f"lens_idx {lens_idx} 越界（共 {len(ALL_LENSES)} 条）"
-
-    lens  = ALL_LENSES[lens_idx]
-    surfs = lens.get("surfaces", [])
-    if isinstance(surfs, str):
-        import ast as _ast
-        surfs = _ast.literal_eval(surfs)
 
     import time as _time
 
@@ -3149,6 +3149,12 @@ def zemax_optimize(input_str: str) -> str:
         )
         # ★ 代码直接做数值比较，不依赖 LLM 判断大小（LLM 曾把 0.0136 < 0.02 判成"未达标"）
         # ★ rms_worst=None 表示追迹失败（全零哨兵），直接判未达标
+        # ★ BUGFIX: 在外层 if 之前预设 rms_pass=False, 避免 rms_worst is None 或
+        #   rms_target is None 时, 后面 physics_warnings 分支引用 rms_pass 抛 NameError
+        #   (常见触发: 严重场曲导致 RMS 全零, 同时 physics_warnings 非空,
+        #    用户传了 rms_target → 原版 line "_not_passed = not (rms_target and rms_pass)"
+        #    会因为 rms_pass 未定义而崩溃, 用户看不到"立即换候选"的引导提示)
+        rms_pass = False
         if rms_worst is not None and rms_worst > 1e-6:
             if rms_target is not None:
                 rms_pass = rms_worst <= rms_target
@@ -3981,12 +3987,6 @@ def run_agent(question: str) -> str:
     return output
 
 
-if __name__ == "__main__":
-    main()
-
-
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # No-RAG 从头设计：双高斯变体初始结构
 # ─────────────────────────────────────────────────────────────────────────────
@@ -4123,3 +4123,13 @@ def _make_scratch_lens(fov: float, fnum: float, n_elements: int = 6):
             f"  片数={n_key}  EFFL={actual_effl:.2f}mm  "
             f"FOV={fov}°  F/{fnum}  近轴RMS={actual_rms:.4f}mm")
     return info, lens_idx
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# ★ BUGFIX: entry point 必须放在所有 @tool 定义【之后】。
+# 原版把 `if __name__ == "__main__": main()` 放在 make_scratch_lens 定义之前,
+# 导致 main() 调 build_agent() 时, tools 列表里引用 make_scratch_lens 抛
+# NameError: name 'make_scratch_lens' is not defined。
+# ═════════════════════════════════════════════════════════════════════════════
+if __name__ == "__main__":
+    main()
