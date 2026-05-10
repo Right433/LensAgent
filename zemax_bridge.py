@@ -47,6 +47,29 @@ _conn = None
 _app  = None
 _sys  = None
 
+import time as _time
+_zemax_last_fail = 0.0   # 上次 IPC 失败的时间戳
+_ZEMAX_COOLDOWN  = 60.0  # 失败后 60 秒内不再尝试调用 Zemax
+
+
+def _zemax_available():
+    """60秒内连不上就返回 False，跳过所有 Zemax 调用"""
+    global _zemax_last_fail
+    if _zemax_last_fail > 0 and (_time.time() - _zemax_last_fail) < _ZEMAX_COOLDOWN:
+        return False
+    return True
+
+
+def _mark_zemax_fail():
+    global _zemax_last_fail
+    _zemax_last_fail = _time.time()
+    print(f"[zemax] IPC 失败，冷却 {_ZEMAX_COOLDOWN}s，期间跳过 Zemax 调用", flush=True)
+
+
+def _mark_zemax_ok():
+    global _zemax_last_fail
+    _zemax_last_fail = 0.0
+
 
 def _ensure_cdgm_catalog(sys_, label="ensure_cdgm"):
     """★ P8 核心修复：
@@ -188,7 +211,32 @@ def _init():
     print("✓ ZOS-API 连接成功，启动 Flask 服务 port=5000")
 
 
+class ZemaxUnavailableError(RuntimeError):
+    """Zemax IPC 不可用（掉线/冷却中），调用方可据此回退近轴优化。"""
+    pass
+
+
 def _get_system():
+    global _conn, _app, _sys
+    # ★ 远程连接掉线检测：主动探测 IPC 是否还活着，断了就清空触发重连。
+    if _sys is not None and _zemax_available():
+        try:
+            _ = _sys.LDE.NumberOfSurfaces
+        except Exception as _probe_err:
+            print(f"[reconnect] IPC 探测失败（{_probe_err}），清空连接准备重连...", flush=True)
+            _conn = None; _app = None; _sys = None
+            _mark_zemax_fail()
+
+    if _sys is None:
+        if not _zemax_available():
+            raise ZemaxUnavailableError("Zemax 冷却中，跳过重连")
+        try:
+            _init()
+            _mark_zemax_ok()
+            print("[reconnect] ✓ ZOS-API 重新连接成功", flush=True)
+        except Exception as _re:
+            _mark_zemax_fail()
+            raise ZemaxUnavailableError(f"Zemax 重连失败: {_re}") from _re
     return _sys
 
 
@@ -301,7 +349,8 @@ def _read_system_metrics(sys_):
 # ═════════════════════════════════════════════════════════════
 @app.route("/status", methods=["GET"])
 def status():
-    return jsonify({"ok": True, "zemax_ready": True})
+    ready = _zemax_available() and _sys is not None
+    return jsonify({"ok": True, "zemax_ready": ready})
 
 
 # ═════════════════════════════════════════════════════════════
@@ -309,6 +358,8 @@ def status():
 # ═════════════════════════════════════════════════════════════
 @app.route("/load_lens", methods=["POST"])
 def load_lens():
+    if not _zemax_available():
+        return jsonify({"error": "Zemax 冷却中，跳过"}), 503
     try:
         data  = request.json
         surfs = data.get("surfaces", [])
@@ -433,8 +484,41 @@ def load_lens():
 
         # ── P4: 三波长 F-d-C 才看得出色差 ───────────────────────
         wl = sys_.SystemData.Wavelengths
-        wl.SelectWavelengthPreset(
-            ZOSAPI.SystemData.WavelengthPreset.FdC_Visible)
+        try:
+            wl.SelectWavelengthPreset(
+                ZOSAPI.SystemData.WavelengthPreset.FdC_Visible)
+            _nw = wl.NumberOfWavelengths
+            print(f"[DIAG load_lens] SelectWavelengthPreset(FdC) 后波长数={_nw}")
+        except Exception as _we:
+            print(f"[DIAG load_lens] SelectWavelengthPreset 失败: {_we}")
+            _nw = 0
+
+        # ★ 验证+修复：preset 有时只给 1~2 个波长，手动补成 F-d-C 三波长
+        # F=0.48613µm  d=0.58756µm(Primary)  C=0.65627µm
+        _FDC = [(0.48613, False), (0.58756, True), (0.65627, False)]
+        try:
+            _nw_now = wl.NumberOfWavelengths
+            if _nw_now < 3:
+                print(f"[DIAG load_lens] 波长数={_nw_now}<3，手动设置 F-d-C 三波长")
+                # 确保有 3 个槽
+                while wl.NumberOfWavelengths < 3:
+                    wl.AddWavelength(0.55, 1.0)
+                for _wi, (_wv, _is_primary) in enumerate(_FDC):
+                    _wobj = wl.GetWavelength(_wi + 1)
+                    _wobj.Wavelength = _wv
+                    _wobj.Weight = 1.0
+                    if _is_primary:
+                        wl.PrimaryWavelengthNumber = _wi + 1
+                print(f"[DIAG load_lens] ✓ 三波长手动设置完成: F={_FDC[0][0]}µm d={_FDC[1][0]}µm C={_FDC[2][0]}µm")
+            else:
+                # preset 成功，确认 Primary = d 线（index 2 通常是 d）
+                try:
+                    wl.PrimaryWavelengthNumber = 2
+                except Exception:
+                    pass
+                print(f"[DIAG load_lens] ✓ 波长数={_nw_now}（F-d-C 三波长正常）")
+        except Exception as _wfix_e:
+            print(f"[DIAG load_lens] ⚠ 波长修复失败（忽略）: {_wfix_e}")
 
         # Surfaces
         # P修复: agent 传过来的 surfs 含 object(0) + 实物面(...) + image(末尾空壳)
@@ -792,27 +876,29 @@ def load_lens():
             print(f"[DIAG probe] B. MFE.GetOperandValue 失败: {e}")
 
         # --- 路径 C: SaveAs + LoadFile 洗一遍内存 ---
-        try:
-            refresh_path = r"C:\zemax_debug\_refresh_probe.zmx"
-            sys_.SaveAs(refresh_path)
-            # LoadFile 第 2 个参数是 saveIfNeeded
-            load_ok = sys_.LoadFile(refresh_path, False)
-            print(f"[DIAG probe] C. SaveAs+LoadFile ok={load_ok}")
+        # ★ 原因4-fix: 每次 load_lens 都做磁盘 IO + 系统重建，默认关闭
+        if os.getenv("ZB_DEBUG_MFE", "0") == "1":
             try:
-                OpType = ZOSAPI.Editors.MFE.MeritOperandType
-                v_effl_c = sys_.MFE.GetOperandValue(OpType.EFFL, 0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-                v_wfno_c = sys_.MFE.GetOperandValue(OpType.WFNO, 0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-                print(f"[DIAG probe] C. reload 后 MFE -> EFFL={v_effl_c}, WFNO={v_wfno_c}")
+                refresh_path = r"C:\zemax_debug\_refresh_probe.zmx"
+                sys_.SaveAs(refresh_path)
+                load_ok = sys_.LoadFile(refresh_path, False)
+                print(f"[DIAG probe] C. SaveAs+LoadFile ok={load_ok}")
+                try:
+                    OpType = ZOSAPI.Editors.MFE.MeritOperandType
+                    v_effl_c = sys_.MFE.GetOperandValue(OpType.EFFL, 0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+                    v_wfno_c = sys_.MFE.GetOperandValue(OpType.WFNO, 0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+                    print(f"[DIAG probe] C. reload 后 MFE -> EFFL={v_effl_c}, WFNO={v_wfno_c}")
+                except Exception as e:
+                    print(f"[DIAG probe] C. reload 后读 MFE 失败: {e}")
+                try:
+                    fod_c = sys_.LDE.GetFirstOrderData()
+                    print(f"[DIAG probe] C. reload 后 GetFirstOrderData -> {fod_c}")
+                except Exception as e:
+                    print(f"[DIAG probe] C. reload 后 GetFirstOrderData 失败: {e}")
             except Exception as e:
-                print(f"[DIAG probe] C. reload 后读 MFE 失败: {e}")
-            # 再读一次 GetFirstOrderData 对比
-            try:
-                fod_c = sys_.LDE.GetFirstOrderData()
-                print(f"[DIAG probe] C. reload 后 GetFirstOrderData -> {fod_c}")
-            except Exception as e:
-                print(f"[DIAG probe] C. reload 后 GetFirstOrderData 失败: {e}")
-        except Exception as e:
-            print(f"[DIAG probe] C. SaveAs+LoadFile 失败: {e}")
+                print(f"[DIAG probe] C. SaveAs+LoadFile 失败: {e}")
+        else:
+            print("[DIAG probe] C. SaveAs+LoadFile 已跳过（ZB_DEBUG_MFE=0）")
 
         print("[DIAG probe] ═══ 探针结束 ═══")
 
@@ -835,16 +921,130 @@ def metrics():
 
 
 # ═════════════════════════════════════════════════════════════
+#   近轴矩阵法兜底优化（Zemax 不可用时调用）
+#   只做 EFFL 缩放（按比例调整所有半径+厚度），RMS 为估算值。
+# ═════════════════════════════════════════════════════════════
+def _paraxial_optimize(payload):
+    """纯 Python 近轴传递矩阵优化，Zemax 离线时的安全兜底。
+    原理：所有半径/厚度按同一比例 scale = target_effl / effl_current 缩放，
+    近轴下 EFFL 与几何尺寸线性相关，缩放后 EFFL 精确命中目标。
+    RMS 用近轴经验公式估算（不可靠，仅供量级参考）。
+    """
+    surfs        = payload.get("surfaces", [])
+    target_effl  = payload.get("target_effl")
+    target_fnum  = payload.get("target_fnum")
+
+    # ── 常见玻璃 d 线折射率表 ────────────────────────────────
+    _N = {
+        "": 1.0, "AIR": 1.0,
+        "H-K9L": 1.5168,  "N-BK7": 1.5168,
+        "H-ZF4A": 1.7283, "N-SF4": 1.7552,
+        "H-ZLAF55D": 1.8503, "H-LAF3": 1.7173,
+        "H-ZK14": 1.5988,  "H-FK61": 1.4970,
+        "H-ZBAF20": 1.7015, "H-BAK2": 1.5400,
+        "H-ZLAF50D": 1.8040, "H-ZF52A": 1.7847,
+    }
+    def _n(mat): return _N.get(str(mat).upper().strip(), 1.5)
+
+    def _mm(A, B):   # 2×2 矩阵乘法
+        return [[A[0][0]*B[0][0]+A[0][1]*B[1][0], A[0][0]*B[0][1]+A[0][1]*B[1][1]],
+                [A[1][0]*B[0][0]+A[1][1]*B[1][0], A[1][0]*B[0][1]+A[1][1]*B[1][1]]]
+
+    def _calc_effl(faces):
+        M = [[1,0],[0,1]]
+        n_cur = 1.0
+        for i, f in enumerate(faces):
+            r, t, n_next = f["r"], f["t"], f["n_after"]
+            # 折射
+            if abs(r) > 1e-9:
+                phi = (n_next - n_cur) / r
+                M = _mm([[1,0],[-phi,1]], M)
+            # 传播（用像方折射率归一化厚度）
+            if abs(t) > 1e-9 and i < len(faces) - 1:
+                M = _mm([[1, t/n_next],[0,1]], M)
+            n_cur = n_next
+        C = M[1][0]
+        return (-1.0 / C) if abs(C) > 1e-12 else None
+
+    # 构建面序列，n_after = 该面之后介质的折射率
+    faces = []
+    for i, s in enumerate(surfs):
+        r   = float(s.get("radius") or 0)
+        t   = float(s.get("thickness") or 0)
+        mat = str(s.get("material") or "")
+        # n_after：若当前面材料是玻璃，折后是玻璃；若是空气/无材料，折后是空气
+        n_after = _n(mat) if _n(mat) != 1.0 else 1.0
+        # 最后一面之后永远是空气（像空间）
+        if i == len(surfs) - 1:
+            n_after = 1.0
+        faces.append({"r": r, "t": t, "n_after": n_after})
+
+    effl_cur = _calc_effl(faces)
+    if effl_cur is None or abs(effl_cur) < 1e-6:
+        return None   # 无法计算，上层应报错而不是静默
+
+    # 缩放比例
+    scale = (float(target_effl) / effl_cur) if (target_effl and float(target_effl) > 0) else 1.0
+    effl_out = effl_cur * scale
+
+    surfaces_out = []
+    for s in surfs:
+        r_orig = float(s.get("radius") or 0)
+        t_orig = float(s.get("thickness") or 0)
+        surfaces_out.append({
+            **s,
+            "radius":    round(r_orig * scale, 6),
+            "thickness": round(t_orig * scale, 6),
+        })
+
+    # 粗估 F# 和 RMS
+    fnum_out   = float(target_fnum) if target_fnum else (effl_out / 5.0)
+    lambda_mm  = 0.0005876
+    r_airy     = 1.22 * lambda_mm * fnum_out
+    rms_est    = round(r_airy * 3.0, 6)   # 未优化镜头，约 3× Airy 半径
+    totr_out   = round(sum(float(s.get("thickness") or 0) for s in surfaces_out), 4)
+
+    note = (f"Zemax 不可用，近轴矩阵兜底：EFFL {effl_cur:.2f}→{effl_out:.2f}mm "
+            f"(×{scale:.4f})；RMS={rms_est*1000:.1f}µm 为估算值，仅供量级参考。")
+    print(f"[paraxial_opt] {note}", flush=True)
+
+    return {
+        "effl": round(effl_out, 4), "fnum": round(fnum_out, 3), "totr": totr_out,
+        "rms_per_field_mm": [rms_est]*3, "distortion_per_field_pct": [0.0, 0.0, 0.0],
+        "merit_before": 999.0, "merit_after": 999.0, "merit_delta": 0.0, "merit": 999.0,
+        "cycles_used": "paraxial", "variables": 0,
+        "surfaces_after": surfaces_out,
+        "fallback_paraxial": True,
+        "paraxial_note": note,
+    }
+
+
+# ═════════════════════════════════════════════════════════════
 #   /zemax_optimize  —— 真正跑 DLS（修 P0+P1+P2）
 # ═════════════════════════════════════════════════════════════
 @app.route("/zemax_optimize", methods=["POST"])
 def zemax_optimize():
+    payload = request.json or {}
+
+    # ★ Zemax 不可用（冷却期 / 刚掉线）→ 直接走近轴兜底，不再返回 503
+    if not _zemax_available():
+        print("[zemax_optimize] Zemax 冷却中，回退近轴优化", flush=True)
+        result = _paraxial_optimize(payload)
+        if result:
+            return jsonify(result)
+        return jsonify({"error": "Zemax 不可用且近轴优化也失败（faces 为空？）"}), 503
+
     try:
-        payload = request.json or {}
-        # ★ P17: cycles<=0 或缺省 => Automatic(跑到收敛)
+        payload = payload  # 已在上面解析
         cycles  = int(payload.get("cycles", -1))
         target_effl = payload.get("target_effl", None)
         target_fnum = payload.get("target_fnum", None)
+        try:
+            rms_target = float(payload["rms_target"]) if payload.get("rms_target") else None
+        except (ValueError, TypeError):
+            rms_target = None
+        if rms_target is not None:
+            print(f"[DIAG optimize] ★ rms_target={rms_target:.6f}mm")
 
         sys_ = _get_system()
         lde  = sys_.LDE
@@ -925,31 +1125,19 @@ def zemax_optimize():
                         var_count += 1
                     except Exception as e:
                         print(f"set radius var surf{i} fail: {e}")
-            # ② thickness 变量：★ 只有空气间隔设为变量，玻璃厚度固定不动
-            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            # 根本原因分析（沙漏形镜片）:
-            #   玻璃厚度设为变量时，CTGT(weight=100)/MNCG(weight=50) 是软约束，
-            #   DLS 降 RMS 的梯度力足以绕开两者，把中心厚度压到 ~0，
-            #   镜片退化为"沙漏/蝴蝶结"形，上下三角超出镜筒，物理不可加工。
-            # 解决方案:
-            #   玻璃厚度只用于初始结构（由数据库或 PRE-T 给出），不参与优化。
-            #   优化自由度 = 所有曲率半径 + 所有空气间隔（已足够丰富）。
-            #   空气间隔变化对像差平衡贡献大，玻璃厚度变化对像差贡献相对小。
-            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            # ② thickness 变量：玻璃厚度 + 空气间隔均设为变量
+            # ★ 修复1：之前玻璃厚度固定（P13），现改为全部开放。
+            #   向导 GlassMin=2mm / GlassMax=10mm / EdgeThickness=1mm 软约束保护，
+            #   MNCG/MXCG/MNET 操作数兜底，避免沙漏形。
             # BFFL (n-2): MarginalRayHeight solve controls this, not Variable
-            # Note: stop surface THICKNESS (air gap after stop) IS a variable
-            #       only stop RADIUS is fixed (flat surface, already skipped above)
             if i == 0 or i == n - 1 or i == n - 2:
                 continue
             t = surf.Thickness
             if t is None or abs(float(t)) > 1e5:
                 continue
-            # ★ 关键门控：玻璃面厚度不设为变量
+            # 玻璃面 + 空气间隔均设为变量
             _mat_for_t = str(surf.Material or "").upper()
-            if _mat_for_t not in ("", "AIR"):
-                # 玻璃厚度固定，跳过，不设 Variable
-                continue
-            # 空气间隔设为变量（可自由改变，靠 MNCA+CTGT 保护下限）
+            _min_t = 0.5 if _mat_for_t in ("", "AIR") else 2.0   # 空气≥0.5 玻璃≥2
             try:
                 cell = surf.ThicknessCell
                 solve = cell.CreateSolveType(SolveType_ns.Variable)
@@ -958,30 +1146,55 @@ def zemax_optimize():
                 # 尝试设硬边界（部分版本支持）
                 try:
                     solve_data = cell.GetSolveData()
-                    solve_data.Minimum = 0.5   # 空气最小 0.5mm
+                    solve_data.Minimum = _min_t
                     solve_data.Maximum = 200.0
                     cell.SetSolveData(solve_data)
                 except Exception:
                     pass
+                print(f"[VAR-T] surf[{i}] {'玻璃' if _mat_for_t not in ('','AIR') else '空气'} thickness → Variable")
             except Exception as e:
-                print(f"set air thickness var surf{i} fail: {e}")
+                print(f"set thickness var surf{i} fail: {e}")
         print(f"[DIAG optimize] 设置了 {var_count} 个 radius 变量, {t_var_count} 个 thickness 变量")
         if var_count == 0 and t_var_count == 0:
             return jsonify({"error": "没有可设为变量的面（全是平面或空气？）"}), 400
 
         # ★ 预处理: 优化前先跑 QuickFocus，把系统调到可追迹状态
-        # 原因: 数据库镜头可能有负厚度，导致追迹失败，DLS在无效状态下乱跑。
-        # QuickFocus 只调整像面位置（不改变镜片），让系统先能正常追迹再优化。
         try:
             qf_tool = sys_.Tools.OpenQuickFocus()
             if qf_tool is not None:
                 qf_tool.Criterion = ZOSAPI.Tools.General.QuickFocusCriterion.SpotSizeRadial
                 qf_tool.UseCentroid = True
-                qf_tool.RunAndWaitForCompletion()
+                import threading as _th_qf
+                _qf_done = [False]
+                def _run_qf():
+                    try: qf_tool.RunAndWaitForCompletion(); _qf_done[0] = True
+                    except Exception: pass
+                _t = _th_qf.Thread(target=_run_qf, daemon=True); _t.start(); _t.join(timeout=30)
+                if not _qf_done[0]:
+                    print("[DIAG optimize] ⚠ QuickFocus 预聚焦超时(>30s)，跳过")
+                else:
+                    print("[DIAG optimize] ✓ QuickFocus 完成，系统已预聚焦")
                 qf_tool.Close()
-                print(f"[DIAG optimize] ✓ QuickFocus 完成，系统已预聚焦")
         except Exception as e:
             print(f"[DIAG optimize] ⚠ QuickFocus 失败（忽略）: {e}")
+
+        # ★ 修复2: FIX-SD-AUTO — 优化前把所有中间面净口径重设为 Automatic solve
+        # load_lens 已设过一次，但 QuickFocus / 多次调用后 solve 可能被覆盖。
+        # Automatic solve 让 Zemax 在追迹后自动算出真实通光口径，不固定为初始值。
+        _sd_auto_ok = 0
+        try:
+            for i in range(1, n - 1):
+                try:
+                    _surf_sd = lde.GetSurfaceAt(i)
+                    _sdcell  = _surf_sd.SemiDiameterCell
+                    _sol_auto = _sdcell.CreateSolveType(ZOSAPI.Editors.SolveType.Automatic)
+                    _sdcell.SetSolveData(_sol_auto)
+                    _sd_auto_ok += 1
+                except Exception:
+                    pass
+            print(f"[FIX-SD-AUTO] {_sd_auto_ok}/{n-2} 个中间面 SemiDiameter → Automatic solve")
+        except Exception as _sda_e:
+            print(f"[FIX-SD-AUTO] 失败（忽略）: {_sda_e}")
 
         # ★ 关键: 给最后一个实物面的 thickness 设 MarginalRayHeight solve（目标高度=0）
         # 这样 Zemax 优化时会自动找到焦点位置（像面自动跟随），否则像面固定不动，光线无法汇聚。
@@ -1030,12 +1243,35 @@ def zemax_optimize():
         try:
             wiz = mf.SEQOptimizationWizard2
 
-            # Criterion: Spot (Python.NET 3.0 needs Enum class, not int)
+            # ★ 修复4: Criterion 强制点列图（三级降级）
+            # Criterion 值: 0=Wavefront(对比度/波前), 1=Spot(点列图RMS半径)
+            # Python.NET 3.0 枚举行为不稳定，多路尝试保证至少一路成功
+            _crit_set = False
+            # 方案A: 枚举类实例化(1=Spot)
             try:
-                wiz.Criterion = wiz.Criterion.__class__(1)  # 1=Spot
-                print("[DIAG wizard] Criterion ->", wiz.Criterion)
+                wiz.Criterion = wiz.Criterion.__class__(1)
+                print("[DIAG wizard] Criterion → Spot (方案A: __class__(1))")
+                _crit_set = True
             except Exception as _e:
-                print("[DIAG wizard] Criterion set failed:", _e)
+                print("[DIAG wizard] 方案A失败:", _e)
+            # 方案B: 枚举名称访问
+            if not _crit_set:
+                try:
+                    from ZOSAPI.Tools.Optimization import OptimizationCriterion
+                    wiz.Criterion = OptimizationCriterion.RMSSpotRadius
+                    print("[DIAG wizard] Criterion → Spot (方案B: OptimizationCriterion.RMSSpotRadius)")
+                    _crit_set = True
+                except Exception as _e:
+                    print("[DIAG wizard] 方案B失败:", _e)
+            # 方案C: 属性名枚举
+            if not _crit_set:
+                try:
+                    wiz.Criterion = wiz.Criterion.__class__.RMSSpotRadius
+                    print("[DIAG wizard] Criterion → Spot (方案C: __class__.RMSSpotRadius)")
+                    _crit_set = True
+                except Exception as _e:
+                    print("[DIAG wizard] 方案C失败（将依赖 OPDX→RSCE 替换兜底）:", _e)
+            print("[DIAG wizard] Criterion =", wiz.Criterion, "| 设置成功=", _crit_set)
 
             # Type=RMS(0), Reference=Centroid(0) keep defaults
             wiz.UseGaussianQuadrature = True
@@ -1075,6 +1311,36 @@ def zemax_optimize():
             _n_wiz = mf.NumberOfOperands
             _wizard_ok = True
             print("[DIAG optimize] Wizard Apply() done, operands:", _n_wiz)
+
+            # ★ FIX: Criterion 设置失败时 wizard 生成 OPDX（波前），fresh 值全 0
+            # → InitialMeritFunction=0 → 优化器无梯度。Apply 后把 OPDX 全替换为 RSCE
+            try:
+                _opdx_rows = [k for k in range(1, mf.NumberOfOperands + 1)
+                              if str(mf.GetOperandAt(k).Type) == "OPDX"]
+                if _opdx_rows:
+                    print(f"[DIAG wizard] 检测到 {len(_opdx_rows)} 个 OPDX，替换为 RSCE")
+                    for _k in reversed(_opdx_rows):
+                        try: mf.RemoveOperandAt(_k)
+                        except Exception: pass
+                    _fo = sys_.SystemData.Fields
+                    _nf = _fo.NumberOfFields
+                    _ym = max((abs(float(_fo.GetField(f).Y)) for f in range(1, _nf+1)), default=1.0) or 1.0
+                    _rt = rms_target if (rms_target and 0 < rms_target < 1.0) else 0.0
+                    for _fi in range(1, _nf + 1):
+                        _hy = float(_fo.GetField(_fi).Y) / _ym
+                        _op = mf.AddOperand()
+                        _op.ChangeType(ZOSAPI.Editors.MFE.MeritOperandType.RSCE)
+                        _op.GetOperandCell(MFEcol.Param1).IntegerValue = 3
+                        _op.GetOperandCell(MFEcol.Param2).IntegerValue = 0
+                        _op.GetOperandCell(MFEcol.Param3).DoubleValue  = 0.0
+                        _op.GetOperandCell(MFEcol.Param4).DoubleValue  = _hy
+                        _op.Target = _rt
+                        _op.Weight = 4.0 if abs(_hy) < 0.3 else (5.0 if abs(_hy) < 0.85 else 6.0)
+                    print(f"[DIAG wizard] OPDX→RSCE 完成，MFE 现有 {mf.NumberOfOperands} 个操作数")
+                else:
+                    print("[DIAG wizard] ✓ 无 OPDX，Criterion 已正确生效")
+            except Exception as _e:
+                print(f"[DIAG wizard] OPDX→RSCE 失败（忽略）: {_e}")
 
         except Exception as _wiz_err:
             print("[DIAG optimize] SEQOptimizationWizard2 failed:", _wiz_err)
@@ -1158,20 +1424,27 @@ def zemax_optimize():
 
         # （向导不生成这四个，每次都无条件追加）
 
-        # 3a. EFFL 有效焦距约束（始终加入，用户值优先，否则当前值软锚）
+        # 3a. EFFL 有效焦距约束（无条件加入，修复3：哨兵值时也保证加入）
         # weight=1：像质(RSCE)主导，EFFL 只作轻约束
         try:
             OpType_effl = ZOSAPI.Editors.MFE.MeritOperandType
             cur_effl = float(sys_.MFE.GetOperandValue(
                 OpType_effl.EFFL, 0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0) or 0)
-            effl_target_val = float(target_effl) if (target_effl is not None and float(target_effl) > 0) \
-                              else (cur_effl if 1.0 < abs(cur_effl) < 1e8 else 0)
-            if effl_target_val > 0:
-                op_effl = mf.AddOperand()
-                op_effl.ChangeType(ZOSAPI.Editors.MFE.MeritOperandType.EFFL)
-                op_effl.Target = effl_target_val
-                op_effl.Weight = 1.0
-                print(f"[DIAG optimize] EFFL 约束加入: target={effl_target_val:.3f}mm weight=1.0")
+            if target_effl is not None and float(target_effl) > 0:
+                effl_target_val = float(target_effl)
+                _effl_src = "payload"
+            elif 1.0 < abs(cur_effl) < 1e8:
+                effl_target_val = cur_effl
+                _effl_src = "系统当前值软锚"
+            else:
+                # ★ 修复3: 哨兵值(1e10)或0时 fallback 到 5mm，保证 EFFL 必须入 MFE
+                effl_target_val = 5.0
+                _effl_src = "默认5mm（EFFL哨兵，保证必入MFE）"
+            op_effl = mf.AddOperand()
+            op_effl.ChangeType(ZOSAPI.Editors.MFE.MeritOperandType.EFFL)
+            op_effl.Target = effl_target_val
+            op_effl.Weight = 1.0
+            print(f"[DIAG optimize] EFFL 约束加入: target={effl_target_val:.3f}mm weight=1.0 ({_effl_src})")
         except Exception as e:
             print(f"[DIAG optimize] ⚠ EFFL 操作数添加失败: {e}")
 
@@ -1224,7 +1497,8 @@ def zemax_optimize():
 
         # 3c. WFNO F# 约束 ── 始终加入（无条件）
         # 若 payload 有 target_fnum 用指定值；否则读系统当前 F# 作软锚。
-        # weight=2：保证光圈不在优化中漂移。
+        # weight=5：F# 必须严格约束，防止优化器为压 RMS 而把光圈开大。
+        # 原来 weight=2 时 RSCE(4~6) >> WFNO(2)，优化器会牺牲 F# 来换 RMS。
         try:
             _wfno_target = None
             if target_fnum is not None and float(target_fnum) > 0:
@@ -1242,8 +1516,8 @@ def zemax_optimize():
                 op_wfno = mf.AddOperand()
                 op_wfno.ChangeType(ZOSAPI.Editors.MFE.MeritOperandType.WFNO)
                 op_wfno.Target = _wfno_target
-                op_wfno.Weight = 2.0
-                print(f"[DIAG optimize] WFNO 约束加入: target=F/{_wfno_target:.2f} weight=2.0")
+                op_wfno.Weight = 5.0
+                print(f"[DIAG optimize] WFNO 约束加入: target=F/{_wfno_target:.2f} weight=5.0")
             else:
                 print(f"[DIAG optimize] WFNO 无法读取当前值，跳过")
         except Exception as e:
@@ -1326,63 +1600,93 @@ def zemax_optimize():
         AlgEnum = ZOSAPI.Tools.Optimization.OptimizationAlgorithm
         opt = sys_.Tools.OpenLocalOptimization()
         if opt is None:
+            # ★ 重试一次：偶发性 None 通常是 Zemax 内部状态未就绪
+            import time as _t_opt; _t_opt.sleep(2)
+            opt = sys_.Tools.OpenLocalOptimization()
+        if opt is None:
             return jsonify({"error": "OpenLocalOptimization 返回 None"}), 500
 
         opt.Algorithm = AlgEnum.DampedLeastSquares
         opt.Cycles    = cycles_enum
 
-        # ── 诊断：优化前逐行 dump，value 用 GetOperandValue 独立求一次 ──
-        # op.Value 在 interactive 模式下可能不随 CalculateMeritFunction 刷新
-        # 所以同时打 cached (op.Value) 和 fresh (GetOperandValue)，方便排障
-        try:
-            mf.CalculateMeritFunction()
-            n_mf = mf.NumberOfOperands
-            print(f"[DIAG optimize] MFE 有 {n_mf} 个 operand, 优化前逐项:")
-            MFEcol = ZOSAPI.Editors.MFE.MeritColumn
-            for k in range(1, n_mf + 1):
-                op_k = mf.GetOperandAt(k)
-                try:
-                    t = op_k.Type
-                    # 从 cell 独立取四个参数重新求值，避开 op.Value 的缓存坑
+        # ── 诊断：优化前逐行 dump（默认关闭，set ZB_DEBUG_MFE=1 开启）──
+        # ★ P2-fix: 每个 operand 独立发一次 IPC，60+ operand 时会卡 10~30s，
+        #   正常跑 benchmark 不需要，只在排障时开。
+        if os.getenv("ZB_DEBUG_MFE", "0") == "1":
+            try:
+                mf.CalculateMeritFunction()
+                n_mf = mf.NumberOfOperands
+                print(f"[DIAG optimize] MFE 有 {n_mf} 个 operand, 优化前逐项:")
+                MFEcol = ZOSAPI.Editors.MFE.MeritColumn
+                for k in range(1, n_mf + 1):
+                    op_k = mf.GetOperandAt(k)
                     try:
-                        p1 = op_k.GetOperandCell(MFEcol.Param1).IntegerValue
-                    except Exception:
-                        p1 = 0
-                    try:
-                        p2 = op_k.GetOperandCell(MFEcol.Param2).IntegerValue
-                    except Exception:
-                        p2 = 0
-                    try:
-                        p3 = op_k.GetOperandCell(MFEcol.Param3).DoubleValue
-                    except Exception:
-                        p3 = 0.0
-                    try:
-                        p4 = op_k.GetOperandCell(MFEcol.Param4).DoubleValue
-                    except Exception:
-                        p4 = 0.0
-                    v_cached = float(op_k.Value)
-                    try:
-                        v_fresh = float(mf.GetOperandValue(t, p1, p2, p3, p4, 0, 0, 0, 0))
-                    except Exception:
-                        v_fresh = None
-                    print(f"  MFE[{k}] type={t} P=({p1},{p2},{p3:.3f},{p4:.3f}) "
-                          f"target={op_k.Target} weight={op_k.Weight} "
-                          f"cached={v_cached} fresh={v_fresh}")
-                except Exception as e:
-                    print(f"  MFE[{k}] 读取失败: {e}")
-        except Exception as e:
-            print(f"[DIAG optimize] MFE dump 失败: {e}")
+                        t = op_k.Type
+                        try:
+                            p1 = op_k.GetOperandCell(MFEcol.Param1).IntegerValue
+                        except Exception:
+                            p1 = 0
+                        try:
+                            p2 = op_k.GetOperandCell(MFEcol.Param2).IntegerValue
+                        except Exception:
+                            p2 = 0
+                        try:
+                            p3 = op_k.GetOperandCell(MFEcol.Param3).DoubleValue
+                        except Exception:
+                            p3 = 0.0
+                        try:
+                            p4 = op_k.GetOperandCell(MFEcol.Param4).DoubleValue
+                        except Exception:
+                            p4 = 0.0
+                        v_cached = float(op_k.Value)
+                        try:
+                            v_fresh = float(mf.GetOperandValue(t, p1, p2, p3, p4, 0, 0, 0, 0))
+                        except Exception:
+                            v_fresh = None
+                        print(f"  MFE[{k}] type={t} P=({p1},{p2},{p3:.3f},{p4:.3f}) "
+                              f"target={op_k.Target} weight={op_k.Weight} "
+                              f"cached={v_cached} fresh={v_fresh}")
+                    except Exception as e:
+                        print(f"  MFE[{k}] 读取失败: {e}")
+            except Exception as e:
+                print(f"[DIAG optimize] MFE dump 失败: {e}")
+        else:
+            print(f"[DIAG optimize] MFE dump 已跳过（ZB_DEBUG_MFE=0），operand 数={mf.NumberOfOperands}")
 
         merit_before = float(opt.InitialMeritFunction)
         print(f"[DIAG optimize] InitialMeritFunction = {merit_before}")
-        opt.RunAndWaitForCompletion()
-        merit_after  = float(opt.CurrentMeritFunction)
-        print(f"[DIAG optimize] CurrentMeritFunction (after) = {merit_after}")
-        opt.Close()
 
-        # ★ DLS完成后再跑一次QuickFocus，把像面拉到真正的焦点
-        # 原因: MarginalRayHeight solve 在DLS迭代中可能被优化器改掉
-        # QuickFocus 直接计算最佳焦点位置，比 solve 更可靠
+        # ★ P1-fix: Automatic 模式无上限，DLS 振荡时会永远不停。
+        #   用线程 + join(timeout) 包裹，超时后强制关闭优化器。
+        import threading as _th
+        _OPT_TIMEOUT = int(os.getenv("ZB_OPT_TIMEOUT", "120"))  # 默认 120s，可用环境变量覆盖
+        _opt_done = {"ok": False}
+        def _run_opt():
+            try:
+                opt.RunAndWaitForCompletion()
+                _opt_done["ok"] = True
+            except Exception as _e:
+                print(f"[DIAG optimize] RunAndWaitForCompletion 异常: {_e}")
+
+        _t_opt = _th.Thread(target=_run_opt, daemon=True)
+        _t_opt.start()
+        _t_opt.join(timeout=_OPT_TIMEOUT)
+        _fallback_paraxial = False
+        if not _opt_done["ok"]:
+            print(f"[DIAG optimize] ⚠ DLS 超时（>{_OPT_TIMEOUT}s），回退近轴优化（QuickFocus）")
+            _fallback_paraxial = True
+            try:
+                opt.Close()
+            except Exception:
+                pass
+            merit_after = merit_before   # DLS 未收敛，merit 维持优化前值
+        else:
+            merit_after = float(opt.CurrentMeritFunction)
+            print(f"[DIAG optimize] CurrentMeritFunction (after) = {merit_after}")
+            opt.Close()
+
+        # ★ DLS完成后（或超时回退时）跑 QuickFocus，把像面拉到近轴焦点
+        # 超时回退时这是唯一的优化手段，至少保证像面位置正确
         try:
             qf2 = sys_.Tools.OpenQuickFocus()
             if qf2 is not None:
@@ -1390,9 +1694,10 @@ def zemax_optimize():
                 qf2.UseCentroid = True
                 qf2.RunAndWaitForCompletion()
                 qf2.Close()
-                print(f"[DIAG optimize] ✓ 优化后 QuickFocus 完成（像面已对准焦点）")
+                label_qf = "（DLS超时回退）" if _fallback_paraxial else "（像面对准焦点）"
+                print(f"[DIAG optimize] ✓ QuickFocus 完成 {label_qf}")
         except Exception as e:
-            print(f"[DIAG optimize] ⚠ 优化后 QuickFocus 失败: {e}")
+            print(f"[DIAG optimize] ⚠ QuickFocus 失败: {e}")
         # ★ 稳定等待: optimizer 关闭后 Zemax 内部状态需要短暂同步，
         #   立即发下一个请求会导致 RemoteDisconnected
         import time as _t; _t.sleep(1.0)
@@ -1402,6 +1707,7 @@ def zemax_optimize():
         # lens['surfaces'] 还是老 radius, 下次 rms_calculator 读到老值会严重误判
         # (之前就是这样以为"RMS 0.018 达标", 其实 Zemax 真值 0.22).
         surfaces_after = []
+        _neg_thickness_surfs = []   # ★ 记录发现负厚度的面号
         try:
             # 索引 0 是 object, NumberOfSurfaces-1 是 image, 中间是实物面
             for i in range(lde.NumberOfSurfaces - 1):
@@ -1420,6 +1726,7 @@ def zemax_optimize():
                     # ★ 过滤负厚度：优化后回传给 agent 的面型不应含负厚度
                     # 否则下次 load_lens 会带着负厚度写入，系统从一开始就非法
                     elif t < 0 and i > 0:
+                        _neg_thickness_surfs.append(i)   # ★ 记录
                         mat_check = str(s.Material or "").upper()
                         t = 1.0 if mat_check not in ("", "AIR") else 0.5
                         print(f"[FIX-T-OUT] surf[{i}] 负厚度回传被修正为 {t}")
@@ -1448,17 +1755,34 @@ def zemax_optimize():
         # 回传 merit 变化 + 真值指标（P3）+ 优化后面型（P10）
         m = _read_system_metrics(sys_)
         m.update({
-            "merit":        round(merit_after, 6),      # alias，让 agent 端 data["merit"] 能用
-            "merit_before": round(merit_before, 6),
-            "merit_after":  round(merit_after, 6),
-            "merit_delta":  round(merit_before - merit_after, 6),
-            "cycles_used":  closest,
-            "variables":    var_count,
-            "surfaces_after": surfaces_after,    # ★ P10: 让 agent 能回写面型
+            "merit":           round(merit_after, 6),
+            "merit_before":    round(merit_before, 6),
+            "merit_after":     round(merit_after, 6),
+            "merit_delta":     round(merit_before - merit_after, 6),
+            "cycles_used":     closest,
+            "variables":       var_count,
+            "surfaces_after":  surfaces_after,
+            "fallback_paraxial": _fallback_paraxial,   # ★ DLS超时回退近轴时为 True
         })
 
         # ★ 物理合理性检查：把异常显式写进返回，让轨迹可见供 self_evolve 蒸馏
         physics_warnings = []
+
+        # ★ 负厚度检测：优化后仍有负厚度面，说明 BFD 被 DLS 压到了负数
+        if _neg_thickness_surfs:
+            physics_warnings.append(
+                "⚠ [负后焦距] 面%s 厚度为负（像面在镜头内部），"
+                "追迹完全失败，RMS=0 不可信。"
+                "原因：BFLD/CTGT 软约束被 DLS 绕开，建议换候选或增大 BFLD weight。"
+                % str(_neg_thickness_surfs))
+
+        # ★ 全零 RMS 检测
+        rms_raw = m.get("rms_per_field_mm", [])
+        if rms_raw and all(float(r) == 0.0 for r in rms_raw):
+            if "⚠ [负后焦距]" not in str(physics_warnings):
+                physics_warnings.append(
+                    "⚠ [RMS全零] 三视场 RMS 均为 0，光线追迹完全失败，结果无效。"
+                    "常见原因：负后焦距 / 光阑位置错误 / 极端缩放比例导致面型崩溃。")
 
         dist = m.get("distortion_per_field_pct", [])
         if len(dist) >= 2:
@@ -1507,8 +1831,18 @@ def zemax_optimize():
                 print(f"  {w}", file=sys.stderr, flush=True)
 
         return jsonify(m)
+    except ZemaxUnavailableError as _zue:
+        # ★ 重连失败（掉线/冷却）→ 回退近轴优化，不报错
+        print(f"[zemax_optimize] 连接失败（{_zue}），回退近轴优化", flush=True)
+        result = _paraxial_optimize(payload)
+        if result:
+            return jsonify(result)
+        return jsonify({"error": f"Zemax 不可用且近轴优化失败: {_zue}"}), 503
     except Exception:
-        return jsonify({"error": traceback.format_exc()}), 500
+        err_str = traceback.format_exc()
+        if "IPC" in err_str or "RemotingException" in err_str or "找不到指定的文件" in err_str:
+            _mark_zemax_fail()
+        return jsonify({"error": err_str}), 500
 
 
 # ═════════════════════════════════════════════════════════════
@@ -1540,6 +1874,8 @@ def save_zmx():
 # ═════════════════════════════════════════════════════════════
 @app.route("/layout", methods=["POST"])
 def layout():
+    if not _zemax_available():
+        return jsonify({"error": "Zemax 冷却中，跳过"}), 503
     try:
         sys_ = _get_system()
 
@@ -1616,6 +1952,8 @@ def layout():
 # ═════════════════════════════════════════════════════════════
 @app.route("/spot_diagram", methods=["POST", "GET"])
 def spot_diagram():
+    if not _zemax_available():
+        return jsonify({"error": "Zemax 冷却中，跳过"}), 503
     try:
         sys_ = _get_system()
         lde  = sys_.LDE
@@ -1650,22 +1988,79 @@ def spot_diagram():
         colors = ["#51cf66", "#339af0", "#ff6b6b",
                   "#ffd43b", "#cc5de8", "#ff922b"]
 
-        # ── 为每个视场追光，收集 (x, y) 像面坐标 ──────────────────────
+        # ── 为每个视场追光，批量插 MFE operand 一次 Calculate 取完 ──────
+        # ★ 原因3-fix: 原来每条光线发 2 次 IPC（REAX+REAY），222 条光 = 444 次 IPC ≈ 22s
+        #   改为：把所有 (hy, px, py) 组合批量写入 MFE，一次 CalculateMeritFunction()，
+        #   再批量读 op.Value，最后删掉这些临时 operand。IPC 次数从 444 降到 ~3。
+        MFEcol = ZOSAPI.Editors.MFE.MeritColumn
+        n_before = mfe.NumberOfOperands   # 记录原有 operand 数，用于后续清理
+
+        # 构建 (field_idx, pupil_idx, hy, px, py) 任务列表
+        tasks = []
+        for fi_idx, hy in enumerate(hy_vals):
+            for pi_idx, (px, py) in enumerate(pupil_pts):
+                tasks.append((fi_idx, pi_idx, hy, px, py))
+
+        # 批量插入 REAX / REAY operand
+        rows = []   # 每项 (reax_row, reay_row)
+        for fi_idx, pi_idx, hy, px, py in tasks:
+            try:
+                op_x = mfe.AddOperand()
+                op_x.ChangeType(OpType.REAX)
+                op_x.GetOperandCell(MFEcol.Param1).IntegerValue = img_surf
+                op_x.GetOperandCell(MFEcol.Param2).IntegerValue = 0
+                op_x.GetOperandCell(MFEcol.Param3).DoubleValue  = 0.0
+                op_x.GetOperandCell(MFEcol.Param4).DoubleValue  = hy
+                op_x.GetOperandCell(MFEcol.Param5).DoubleValue  = px
+                op_x.GetOperandCell(MFEcol.Param6).DoubleValue  = py
+                rx = mfe.NumberOfOperands
+
+                op_y = mfe.AddOperand()
+                op_y.ChangeType(OpType.REAY)
+                op_y.GetOperandCell(MFEcol.Param1).IntegerValue = img_surf
+                op_y.GetOperandCell(MFEcol.Param2).IntegerValue = 0
+                op_y.GetOperandCell(MFEcol.Param3).DoubleValue  = 0.0
+                op_y.GetOperandCell(MFEcol.Param4).DoubleValue  = hy
+                op_y.GetOperandCell(MFEcol.Param5).DoubleValue  = px
+                op_y.GetOperandCell(MFEcol.Param6).DoubleValue  = py
+                ry = mfe.NumberOfOperands
+                rows.append((rx, ry))
+            except Exception:
+                rows.append((None, None))
+
+        # 一次 Calculate 刷新所有值
+        try:
+            mfe.CalculateMeritFunction()
+        except Exception as _ce:
+            print(f"[spot_diagram] CalculateMeritFunction 失败: {_ce}")
+
+        # 读取结果
+        raw_pts = {}   # fi_idx -> [(x, y), ...]
+        for idx, (task, (rx, ry)) in enumerate(zip(tasks, rows)):
+            fi_idx, pi_idx, hy, px, py = task
+            if rx is None or ry is None:
+                continue
+            try:
+                x_val = float(mfe.GetOperandAt(rx).Value)
+                y_val = float(mfe.GetOperandAt(ry).Value)
+                if abs(x_val) < 1e5 and abs(y_val) < 1e5:
+                    raw_pts.setdefault(fi_idx, []).append((x_val, y_val))
+            except Exception:
+                pass
+
+        # 清理临时 operand（从后往前删，避免行号偏移）
+        total_added = len(rows) * 2
+        for _ in range(total_added):
+            try:
+                mfe.RemoveOperandAt(mfe.NumberOfOperands)
+            except Exception:
+                break
+
         field_spots = []
         for fi_idx, hy in enumerate(hy_vals):
-            xs, ys = [], []
-            for px, py in pupil_pts:
-                try:
-                    x_val = float(mfe.GetOperandValue(
-                        OpType.REAX, img_surf, 0, 0.0, hy, px, py, 0.0, 0.0))
-                    y_val = float(mfe.GetOperandValue(
-                        OpType.REAY, img_surf, 0, 0.0, hy, px, py, 0.0, 0.0))
-                    # 过滤追迹失败的点（返回 1e10 哨兵）
-                    if abs(x_val) < 1e5 and abs(y_val) < 1e5:
-                        xs.append(x_val)
-                        ys.append(y_val)
-                except Exception:
-                    pass
+            pts = raw_pts.get(fi_idx, [])
+            xs = [p[0] for p in pts]
+            ys = [p[1] for p in pts]
             field_spots.append((hy, xs, ys))
 
         # ── 绘图：每个视场一个子图 ─────────────────────────────────────
@@ -1673,11 +2068,11 @@ def spot_diagram():
         fig, axes = plt.subplots(1, n_fields,
                                  figsize=(3.5 * n_fields, 4.0),
                                  squeeze=False)
-        fig.patch.set_facecolor("#0d1117")
+        fig.patch.set_facecolor("white")
 
         for col_idx, (hy, xs, ys) in enumerate(field_spots):
             ax = axes[0][col_idx]
-            ax.set_facecolor("#0d1117")
+            ax.set_facecolor("white")
             color = colors[col_idx % len(colors)]
 
             if xs and ys:
@@ -1688,18 +2083,15 @@ def spot_diagram():
                 ys_c = [y - cy for y in ys]
 
                 # ★ 离群点剔除：先算初步 RMS，去掉距中心 > 5×RMS 的光线
-                # 原因：全反射/渐晕光线返回的坐标会通过 1e5 过滤但仍远大于正常值，
-                #       混入后 RMS 被严重高估（实测从 ~30µm 膨胀到 ~500µm）
                 if len(xs_c) >= 4:
                     rms_prelim = math.sqrt(sum(x**2 + y**2 for x, y in zip(xs_c, ys_c)) / len(xs_c))
-                    threshold = max(rms_prelim * 5, 0.001)  # 至少 1µm 阈值
+                    threshold = max(rms_prelim * 5, 0.001)
                     pairs = [(x, y) for x, y in zip(xs_c, ys_c) if math.hypot(x, y) <= threshold]
                     if len(pairs) >= 4:
                         xs_c = [p[0] for p in pairs]
                         ys_c = [p[1] for p in pairs]
 
-                # Airy disk 半径: r_airy ≈ 1.22 × λ × F#
-                # 用 F d 线 587.6 nm，从系统读 WFNO
+                # Airy disk 半径
                 try:
                     fnum_val = float(mfe.GetOperandValue(
                         OpType.WFNO, 0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0))
@@ -1707,7 +2099,7 @@ def spot_diagram():
                         raise ValueError
                 except Exception:
                     fnum_val = 2.8
-                lambda_d_mm = 0.0005876   # 587.6 nm in mm
+                lambda_d_mm = 0.0005876
                 r_airy = 1.22 * lambda_d_mm * fnum_val
 
                 # 散点
@@ -1716,42 +2108,44 @@ def spot_diagram():
                 theta = [2 * math.pi * k / 120 for k in range(121)]
                 ax.plot([r_airy * math.cos(t) for t in theta],
                         [r_airy * math.sin(t) for t in theta],
-                        color="white", lw=0.8, alpha=0.5, linestyle="--",
+                        color="#333333", lw=0.8, alpha=0.6, linestyle="--",
                         label=f"Airy r={r_airy*1000:.1f} µm")
 
                 # RMS 计算
                 rms = math.sqrt(sum(x**2 + y**2 for x, y in zip(xs_c, ys_c)) / len(xs_c))
                 ax.set_title(f"Field {hy:+.2f}\nRMS={rms*1000:.1f} µm",
-                             color="white", fontsize=9)
-                ax.legend(fontsize=7, facecolor="#1a1a2e", labelcolor="white",
-                          loc="upper right")
-                # 轴范围：max(rms*4, airy*3) 保证可读
+                             color="black", fontsize=9)
+                ax.legend(fontsize=7, facecolor="white", labelcolor="black",
+                          loc="upper right", edgecolor="#cccccc")
                 half = max(rms * 4, r_airy * 3, 0.001)
                 ax.set_xlim(-half, half)
                 ax.set_ylim(-half, half)
             else:
-                ax.set_title(f"Field {hy:+.2f}\n(no rays)", color="white", fontsize=9)
+                ax.set_title(f"Field {hy:+.2f}\n(no rays)", color="black", fontsize=9)
 
             ax.set_aspect("equal")
-            ax.set_xlabel("X (mm)", color="white", fontsize=8)
-            ax.set_ylabel("Y (mm)", color="white", fontsize=8)
-            ax.tick_params(colors="white", labelsize=7)
+            ax.set_xlabel("X (mm)", color="black", fontsize=8)
+            ax.set_ylabel("Y (mm)", color="black", fontsize=8)
+            ax.tick_params(colors="black", labelsize=7)
             for sp in ax.spines.values():
-                sp.set_edgecolor("#444")
-            ax.axhline(0, color="#444", lw=0.5)
-            ax.axvline(0, color="#444", lw=0.5)
+                sp.set_edgecolor("#aaaaaa")
+            ax.axhline(0, color="#cccccc", lw=0.5)
+            ax.axvline(0, color="#cccccc", lw=0.5)
 
-        fig.suptitle("Spot Diagram", color="white", fontsize=11, y=1.01)
+        fig.suptitle("Spot Diagram", color="black", fontsize=11, y=1.01)
         fig.tight_layout()
 
         buf = io.BytesIO()
         plt.savefig(buf, format="png", dpi=150, bbox_inches="tight",
-                    facecolor=fig.get_facecolor())
+                    facecolor="white")
         plt.close(fig)
         buf.seek(0)
         return send_file(buf, mimetype="image/png")
     except Exception:
-        return jsonify({"error": traceback.format_exc()}), 500
+        err_str = traceback.format_exc()
+        if "IPC" in err_str or "RemotingException" in err_str or "找不到指定的文件" in err_str:
+            _mark_zemax_fail()
+        return jsonify({"error": err_str}), 500
 
 
 # ═════════════════════════════════════════════════════════════

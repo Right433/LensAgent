@@ -10,6 +10,7 @@ import os, sys, ast, copy, pickle, argparse, json
 from pathlib import Path
 
 import torch
+import patch_openai_stop  # ★ inject ReAct stop tokens at openai SDK level
 from langchain_openai import ChatOpenAI
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
@@ -24,41 +25,64 @@ import sys as _sys; _sys.modules.setdefault("agent_zemax", _sys.modules[__name__
 # self-evolve 模块（check_spec / 轨迹记录 / 蒸馏）
 try:
     from self_evolve import (
-        check_spec, record_step,
+        record_step,
         start_session, end_session,
         load_learned_for_prompt, get_learned_detail,
+        retrieve_relevant_skills, try_execute_skill, mark_skill_reused,
+        update_skill_best_rms,          # ★ 新增：复用成功后回写最优 RMS
+        # check_spec 已移至本文件（见下方），彻底消除循环导入
+        _SESSION_CTX,           # 模块级 dict，in-place 更新，引用始终有效
+        DEFAULT_RMS_PASS_MM, EFFL_TOL_PCT, FNUM_TOL_PCT,
     )
     _HAS_SELF_EVOLVE = True
 except ImportError:
     _HAS_SELF_EVOLVE = False
     print("⚠ self_evolve 未找到，self-evolve 功能禁用")
+    _SESSION_CTX: dict = {}
+    DEFAULT_RMS_PASS_MM = 1.0
+    EFFL_TOL_PCT = 2.0
+    FNUM_TOL_PCT = 2.0
     def record_step(*a, **kw): pass
-    def start_session(*a, **kw): pass
+    def start_session(*a, **kw): return None
     def end_session(*a, **kw): return {}
     def load_learned_for_prompt(): return {}
     def get_learned_detail(name): return None
+    def retrieve_relevant_skills(*a, **kw): return []
+    def try_execute_skill(*a, **kw): return {"ok": False, "error": "self_evolve 未加载"}
+    def mark_skill_reused(*a, **kw): pass
+    def update_skill_best_rms(*a, **kw): return (False, "self_evolve 未加载")
 
-BASE_URL  = "http://localhost:8001/v1"
-API_KEY   = "EMPTY"
-LLM_MODEL = "qwen3"
+import subprocess as _sp
+_env_out = _sp.run(["bash","-c","source /gz-data/.env && env"],
+                   capture_output=True,text=True).stdout
+for _l in _env_out.splitlines():
+    if "=" in _l:
+        _k,_,_v = _l.partition("=")
+        __import__("os").environ.setdefault(_k.strip(),_v.strip())
+BASE_URL  = "https://aihubmix.com/v1"
+API_KEY   = __import__("os").environ.get("GEMINI_API_KEY","")
+LLM_MODEL = "claude-haiku-4-5"
 EMB_MODEL = "/root/.cache/huggingface/hub/models--shibing624--text2vec-base-chinese/snapshots/183bb99aa7af74355fb58d16edf8c13ae7c5433e"
 FAISS_DIR = "/gz-data/faiss_index"
 
 
 
-_device = "cpu"  # 强制CPU，GPU留给Qwen
+_NO_EFFL_ALIGN = False  # ablation flag
+_device = "cuda"
 
-llm = ChatOpenAI(
+_llm_raw = ChatOpenAI(
     model=LLM_MODEL,
     openai_api_key=API_KEY,
     openai_api_base=BASE_URL,
     temperature=0,
-    max_tokens=512,    
+    max_tokens=4096,
 )
+# ★ .bind() 强制把 stop 透传给底层 API (顶层 stop 在某些 langchain 版本被忽略)
+llm = _llm_raw.bind(stop=["\nObservation:", "\nObservation", "Observation:"])
 
 embeddings = HuggingFaceEmbeddings(
     model_name=EMB_MODEL,
-    model_kwargs={"device": "cpu"},
+    model_kwargs={"device": "cuda"},
     encode_kwargs={"batch_size": 64},
 )
 
@@ -112,12 +136,12 @@ _LENS_BACKUP: dict = {}
 _LENS_BACKUP_PRE_ZEMAX: dict = {}  # ★ P16 Zemax 优化前的快照(独立于 modify 备份,便于 reset)
 _SEARCH_COUNT: dict = {}  # lens_search调用计数，防死循环
 _INTERPRET_CALLED: bool = False  # interpret_requirement只能调一次
+_INTERPRET_RESULT: dict = {}     # 存储上次解析结果，供重复调用时回显
+# local_optimize 停滞计数器 {lens_idx: consecutive_no_improve_count}
 _OPTIMIZE_STALL: dict = {}
 _OPTIMIZE_TOTAL: dict = {}
 _MODIFY_COUNT: dict = {}  # modify_lens调用计数，防死循环
 _OPTIMIZE_MAX = 6
-# local_optimize 停滞计数器 {lens_idx: consecutive_no_improve_count}
-_OPTIMIZE_STALL: dict = {}
 
 # ★ P14: 全局工具调用历史 + 熔断
 # 在最近 _CIRCUIT_WINDOW 次工具调用中,若 (tool_name, normalized_input) 累计
@@ -188,6 +212,20 @@ def _parse_tool_input(input_str: str) -> dict:
     return parts
 
 
+def _check_lens_bounds(lens_idx: int) -> "str | None":
+    """越界检查辅助函数。
+    返回错误消息字符串（工具应直接 return），或 None（合法）。
+    统一替代各工具中重复出现的两行式检查：
+      if not ALL_LENSES or lens_idx >= len(ALL_LENSES): ...
+      if lens_idx < 0 or lens_idx >= len(ALL_LENSES): ...
+    """
+    if not ALL_LENSES:
+        return "镜头数据未加载"
+    if lens_idx < 0 or lens_idx >= len(ALL_LENSES):
+        return f"lens_idx {lens_idx} 越界（共 {len(ALL_LENSES)} 条）"
+    return None
+
+
 
 @tool
 def lens_search(query: str) -> str:
@@ -231,10 +269,9 @@ def rms_calculator(lens_idx: str) -> str:
         lens_idx = int(str(lens_idx).strip())
     except (ValueError, TypeError):
         return f"lens_idx 必须是整数，收到: {lens_idx!r}"
-    if not ALL_LENSES:
-        return "镜头数据未加载"
-    if lens_idx < 0 or lens_idx >= len(ALL_LENSES):
-        return f"lens_idx {lens_idx} 越界（共 {len(ALL_LENSES)} 条）"
+    _err = _check_lens_bounds(lens_idx)
+    if _err:
+        return _err
 
     lens = ALL_LENSES[lens_idx]
     # 优先用实时追迹（反映最新修改）
@@ -251,6 +288,10 @@ def rms_calculator(lens_idx: str) -> str:
 @tool
 def rank_by_rms(query: str) -> str:
     """按 FOV/Fnum 数值距离检索并按 RMS 排序。输入: "FOV=35 F/2.8, fov_tol=5, fnum_tol=0.5"。若 warning 出现则为 OOD,直接用 rank=1。"""
+    if getattr(_sys.modules[__name__], "_NO_RAG", False):
+        return ('{"results": [], "message": "RAG is completely disabled. '
+                'You MUST use make_scratch_lens tool instead. '
+                'Do NOT retry rank_by_rms with different tolerances."}')
     import re
     # 解析 FOV/Fnum 目标值和容忍度
     fov_target = fnum_target = None
@@ -304,22 +345,22 @@ def rank_by_rms(query: str) -> str:
         from openai import OpenAI
         from retrieval_skills import RETRIEVAL_SELECTION_PROMPT
         _cli = OpenAI(
-            api_key="sk-uwMXbGBi2LKb9EnmGIOQT1QOISpA8jgazzvXwVLq5o5h79WZ",
-            base_url="https://us.novaiapi.com/v1",
+            api_key="sk-KwK2OFR64Hvpyl5B57E9365333C34b75925eD6E33e8cDb81",
+            base_url="https://aihubmix.com/v1",
         )
         candidates_desc = [
             {"lens_idx": m["lens_idx"], "fov": m.get("fov"), "fnum": m.get("fnum"),
              "effl": round(m.get("calc_effl") or 0, 2), "rms": round(rms, 4)}
             for rms, m in top20
         ]
-        print(f"\n[OOD-DEBUG] top20 FOV: {sorted(set(round(c["fov"] or 0, 0) for c in candidates_desc))}")
-        print(f"[OOD-DEBUG] top20 Fnum: {sorted(set(round(c["fnum"] or 0, 1) for c in candidates_desc))}")
+        print(f"\n[OOD-DEBUG] top20 FOV: {sorted(set(round(c.get('fov') or 0, 0) for c in candidates_desc))}")
+        print(f"[OOD-DEBUG] top20 Fnum: {sorted(set(round(c.get('fnum') or 0, 1) for c in candidates_desc))}")
         gemini_prompt = RETRIEVAL_SELECTION_PROMPT.format(
             fov_target=fov_target, fnum_target=fnum_target,
             candidates_json=json.dumps(candidates_desc, ensure_ascii=False),
         )
         gemini_resp = _cli.chat.completions.create(
-            model=os.environ.get("GEMINI_MODEL_SELECT", "gemini-3-flash-preview"),
+            model="gemini-2.0-flash",
             messages=[{"role": "user", "content": gemini_prompt}],
             max_tokens=1000,
         )
@@ -347,17 +388,46 @@ def rank_by_rms(query: str) -> str:
     else:
         candidates = candidates[:5]
 
+    # ★ Skill 引导的候选过滤：若 start_session 从 skill_code 解析到
+    # skip_if_front_glass / prefer_front_glass，则重排 candidates：
+    # preferred 置前，skip 置后（保留作兜底）
+    try:
+        _skip_g   = _SESSION_CTX.get("skip_if_front_glass", [])
+        _prefer_g = _SESSION_CTX.get("prefer_front_glass", [])
+        if _skip_g or _prefer_g:
+            def _front_glass(lid):
+                surfs = (ALL_LENSES[lid].get("surfaces") or []) if 0 <= lid < len(ALL_LENSES) else []
+                for s in surfs:
+                    mat = s.get("material", "AIR")
+                    if mat and mat != "AIR":
+                        return mat
+                return ""
+            _pref, _neutral, _skip = [], [], []
+            for item in candidates:
+                _fg = _front_glass(item[1].get("lens_idx", -1))
+                if any(_fg.startswith(g) for g in _skip_g):
+                    _skip.append(item)
+                elif any(_fg.startswith(g) for g in _prefer_g):
+                    _pref.append(item)
+                else:
+                    _neutral.append(item)
+            if _pref or _skip:
+                candidates = (_pref + _neutral + _skip)[:5]
+                _new_fg = _front_glass(candidates[0][1].get("lens_idx", -1))
+                print(f"[Skill filter] prefer={len(_pref)} neutral={len(_neutral)} "
+                      f"skip={len(_skip)} → rank1 front glass: {_new_fg}")
+    except Exception as _fe:
+        print(f"[Skill filter] 异常（跳过）: {_fe}")
+
     # 判定是否算 OOD（最佳候选 FOV 或 Fnum 偏差大就警告 agent）
+    # ★ OOD: 只看 F#，不看 FOV。FOV 由 Zemax 直接设置，不需要数据库匹配。
     is_ood = False
-    if candidates and (fov_target is not None or fnum_target is not None):
+    if candidates and fnum_target is not None:
         _, best = candidates[0]
-        best_fov = best.get("fov")
         best_fnum = best.get("fnum")
-        if fov_target and best_fov and abs(float(best_fov) - fov_target) > fov_tol:
-            is_ood = True
         if fnum_target and best_fnum and abs(float(best_fnum) - fnum_target) > fnum_tol:
             is_ood = True
-    fallback = is_ood  # 复用下游 warning 生成逻辑
+    fallback = is_ood
 
     results_list = []
     for rank, (rms, m) in enumerate(candidates, 1):
@@ -378,9 +448,9 @@ def rank_by_rms(query: str) -> str:
                 effl_hints.append(f"镜头#{r['id']} EFFL={effl}mm")
         effl_hint_str = "、".join(effl_hints) if effl_hints else "未知"
         out["warning"] = (
-            f"⚠ 无FOV≈{fov_target}° F/{fnum_target}精确匹配，用上方镜头作起点。\n"
-            f"EFFL: {effl_hint_str}\n"
-            f"步骤: 1.align_effl → 2.修光阑SD降F# → 3.local_optimize → 4.zemax_optimize(rms_target=X,fnum_target=Y)"
+            f"⚠ F/{fnum_target}精确匹配不存在，用上方候选作结构起点（FOV 由 Zemax 直接设置，无需匹配）。\\n"
+            f"EFFL: {effl_hint_str}\\n"
+            f"步骤: 1.align_effl → 2.修光阑SD调F# → 3.local_optimize → 4.zemax_optimize(fov_target=<用户FOV>, rms_target=X, fnum_target=Y)"
         )
 
     # ★ self-evolve: 记录检索决策(OOD 判定、选中的候选)
@@ -412,10 +482,9 @@ def get_lens_surfaces(lens_idx: str) -> str:
         lens_idx = int(str(lens_idx).strip())
     except (ValueError, TypeError):
         return f"lens_idx 必须是整数，收到: {lens_idx!r}"
-    if not ALL_LENSES:
-        return "镜头数据未加载"
-    if lens_idx < 0 or lens_idx >= len(ALL_LENSES):
-        return f"lens_idx {lens_idx} 越界"
+    _err = _check_lens_bounds(lens_idx)
+    if _err:
+        return _err
 
     lens  = ALL_LENSES[lens_idx]
     surfs = lens.get("surfaces", [])
@@ -530,10 +599,9 @@ def modify_lens(input_str: str) -> str:
     except Exception as e:
         return f"输入格式错误: {e}\n正确格式: lens_idx=55097, surface=3, param=radius, value=-48.5"
 
-    if not ALL_LENSES:
-        return "镜头数据未加载"
-    if lens_idx < 0 or lens_idx >= len(ALL_LENSES):
-        return f"lens_idx {lens_idx} 越界"
+    _err = _check_lens_bounds(lens_idx)
+    if _err:
+        return _err
 
     # 死循环防护：同一镜头同一参数修改超过3次拒绝
     _mod_key = f"{lens_idx}_{surface_id}_{param}"
@@ -726,10 +794,43 @@ def reset_lens(lens_idx: str) -> str:
 
 @tool
 def interpret_requirement(description: str) -> str:
-    """把自然语言需求转成 FOV/F#/RMS 参数。输入: 需求描述。只能用一次。"""
-    global _INTERPRET_CALLED
+    """把自然语言需求转成 FOV/F#/RMS 参数。输入: 需求描述。只能用一次。
+    ★ 调用后立即调用 rank_by_rms，禁止再次调用本工具。
+    """
+    global _INTERPRET_CALLED, _INTERPRET_RESULT
+    # ★ 熔断：同一 session 内连续重复调用 → 强制跳出
+    _tripped = _circuit_guard("interpret_requirement", description[:50])
+    if _tripped:
+        r = _INTERPRET_RESULT
+        fov = r.get("fov","?"); fnum = r.get("fnum","?"); rms = r.get("rms","?")
+        y = r.get("y_target"); effl = r.get("effl_derived")
+        y_hint = f", y_target={y}, effl_target={effl}" if y else ""
+        msg = ("STOP: interpret_requirement called repeatedly. "
+               "Parsed: FOV=" + str(fov) + " F/" + str(fnum) + " RMS<" + str(rms) + "mm\n"
+               "Next Action: rank_by_rms\n"
+               "Next Input: FOV=" + str(fov) + " F/" + str(fnum) + ", fov_tol=10, fnum_tol=0.5\n"
+               "After retrieval: assess_and_plan(lens_idx=<id>, fov_target=" + str(fov) +
+               ", fnum_target=" + str(fnum) + ", rms_target=" + str(rms) + str(y_hint) + ")")
+        return msg
     if _INTERPRET_CALLED:
-        return "interpret_requirement已调用过，禁止重复调用，请直接用已有参数检索。"
+        # 给出具体参数，让模型立刻知道下一步
+        r = _INTERPRET_RESULT
+        fov  = r.get("fov",  "?")
+        fnum = r.get("fnum", "?")
+        rms  = r.get("rms",  "?")
+        y    = r.get("y_target")
+        effl = r.get("effl_derived")
+        y_hint = f", y_target={y}, effl_target={effl}" if y else ""
+        return (
+            f"⛔ interpret_requirement已调用过，禁止重复调用，直接执行下面的 Action:\n"
+            f"\n"
+            f"Action: rank_by_rms\n"
+            f"Action Input: FOV={fov} F/{fnum}, fov_tol=10, fnum_tol=0.5\n"
+            f"\n"
+            f"（检索到镜头后调用 assess_and_plan，"
+            f"必须加上 y_target 参数: lens_idx=<id>, fov_target={fov}, "
+            f"fnum_target={fnum}, rms_target={rms}{y_hint}）"
+        )
     _INTERPRET_CALLED = True
     desc = description.lower()
 
@@ -796,6 +897,15 @@ def interpret_requirement(description: str) -> str:
     if _fn_m:
         fnum_mid = float(_fn_m.group(1))
 
+    # 保存解析结果供重复调用时回显
+    # y_target / effl_derived 在模糊描述模式下不适用（由 assess_and_plan 处理）
+    y_target     = None
+    effl_derived = None
+    _INTERPRET_RESULT.update({
+        "fov": fov_mid, "fnum": fnum_mid, "rms": rms_target,
+        "y_target": y_target, "effl_derived": effl_derived,
+    })
+
     return ("📋 需求解析结果:\n" +
             "  场景: " + note + "\n" +
             "  推荐 FOV  = " + str(fov_mid) + " 度  （范围 " + str(fov_min) + "~" + str(fov_max) + " 度）\n" +
@@ -808,6 +918,12 @@ def interpret_requirement(description: str) -> str:
 @tool
 def align_effl(input_str: str) -> str:
     """按比例缩放整个系统以对齐 EFFL。输入: "lens_idx=X, target_effl=V"。偏差>85%会拒绝。"""
+    global _NO_EFFL_ALIGN
+    import builtins as _bt
+    if _NO_EFFL_ALIGN or getattr(_bt, "_ABLATION_NO_EFFL", False):
+        return "⚠ align_effl 已禁用（消融实验 w/o EFFL Align）。请直接用 zemax_optimize 优化，不对齐EFFL。"
+    if _NO_EFFL_ALIGN:
+        return "⚠ align_effl 已禁用（消融实验 w/o EFFL Align）。请跳过此步骤，直接用 zemax_optimize 优化。"
     try:
         input_str = str(input_str).strip().strip(chr(34)).strip(chr(39))
         parts = {}
@@ -821,14 +937,35 @@ def align_effl(input_str: str) -> str:
     except Exception as e:
         return f"输入格式错误: {e}. 正确格式: lens_idx=36237, target_effl=34.0"
 
-    if not ALL_LENSES:
-        return "镜头数据未加载"
-    if lens_idx < 0 or lens_idx >= len(ALL_LENSES):
-        return f"lens_idx {lens_idx} 越界"
+    _err = _check_lens_bounds(lens_idx)
+    if _err:
+        return _err
 
     lens = ALL_LENSES[lens_idx]
 
-    # 先算当前 EFFL
+    # ★ 抓图：把原始数据库镜头推入 Zemax，抓 layout + spot（缩放前）
+    # 只在该 lens_idx 的首次 align_effl 时抓，避免候选切换时重复
+    if not _SESSION_CTX.get(f"_raw_captured_{lens_idx}"):
+        _SESSION_CTX[f"_raw_captured_{lens_idx}"] = True
+        try:
+            import requests as _req_raw
+            surfs_raw = lens.get("surfaces", [])
+            if isinstance(surfs_raw, str):
+                import ast as _ast_raw; surfs_raw = _ast_raw.literal_eval(surfs_raw)
+            _resp_raw = _req_raw.post(
+                f"{ZEMAX_BRIDGE}/load_lens",
+                json={"surfaces": _sanitize_surfs(surfs_raw),
+                      "fov":  lens.get("fov"),
+                      "fnum": lens.get("fnum"),
+                      "stop_surface": lens.get("stop_surface")},
+                headers=_NGROK_HEADERS, timeout=15)
+            if _resp_raw.ok:
+                _auto_capture(lens_idx, "raw_from_db")
+                print(f"[align_effl] ✓ 原始检索镜头抓图完成 (lens#{lens_idx})", flush=True)
+            else:
+                print(f"[align_effl] ⚠ 原始镜头 load_lens HTTP {_resp_raw.status_code}", flush=True)
+        except Exception as _re:
+            print(f"[align_effl] ⚠ 原始镜头抓图失败: {_re}", flush=True)
     r = _calc(lens)
     if not r.get("valid"):
         return f"追迹失败，无法对齐EFFL: {r.get('msg')}"
@@ -838,7 +975,8 @@ def align_effl(input_str: str) -> str:
 
     scale = target_effl / current_effl
 
-    # 放缩比例限制：超过 ±30% 警告，超过 ±60% 拒绝
+    # 放缩比例限制：超过 150% 时输出警告，超过 300%（即 4× 或 ×0.25）时拒绝执行。
+    # docstring 中的"偏差>85%"描述的是建议重检索的经验值，非硬拒绝线。
     scale_pct = abs(scale - 1.0) * 100
     if scale_pct > 300:
         return (f"⚠ 放缩比例过大（{scale:.3f}，偏差{scale_pct:.0f}%），拒绝执行。"
@@ -895,6 +1033,608 @@ def align_effl(input_str: str) -> str:
 
 
 @tool
+def assess_and_plan(input_str: str) -> str:
+    """检索到镜头后，分析其结构与目标需求的差距，输出物理合理的修改计划。
+    输入: "lens_idx=X, fov_target=50, fnum_target=2.0, rms_target=0.05"
+    输出: 当前状态诊断 + 需要做哪些修改 + 修改顺序建议。
+    在 rank_by_rms 之后、align_effl/modify_lens 之前调用一次。
+    """
+    import ast, math
+
+    try:
+        input_str = str(input_str).strip().strip(chr(34)).strip(chr(39))
+        parts = {}
+        for seg in input_str.split(","):
+            seg = seg.strip()
+            if "=" in seg:
+                k, v = seg.split("=", 1)
+                parts[k.strip()] = v.strip()
+        lens_idx     = int(parts["lens_idx"])
+        fov_target   = float(parts.get("fov_target",  50.0))
+        fnum_target  = float(parts.get("fnum_target",  2.0))
+        rms_target   = float(parts.get("rms_target",  0.05))
+        # ★ y_target / effl_target: 用户传感器参数，优先级高于 RAG 镜头自身像高
+        y_target    = float(parts["y_target"])    if parts.get("y_target")    else None
+        effl_target = float(parts["effl_target"]) if parts.get("effl_target") else None
+    except Exception as e:
+        return f"输入格式错误: {e}\n正确格式: lens_idx=X, fov_target=50, fnum_target=2.0, rms_target=0.05"
+
+    _err = _check_lens_bounds(lens_idx)
+    if _err:
+        return _err
+
+    lens  = ALL_LENSES[lens_idx]
+    surfs = lens.get("surfaces", [])
+    if isinstance(surfs, str):
+        surfs = ast.literal_eval(surfs)
+
+    # ── 1. 当前近轴追迹 ─────────────────────────────────────────
+    r = _calc(lens)
+    calc_ok   = r.get("valid", False)
+    cur_effl  = r.get("effl",  lens.get("calc_effl")) if calc_ok else lens.get("calc_effl")
+    cur_rms   = r.get("rms",   lens.get("calc_rms"))  if calc_ok else lens.get("calc_rms")
+    cur_fnum  = float(lens.get("fnum", 0))
+    cur_fov   = float(lens.get("fov",  0))
+
+    lines = [f"═══ 镜头#{lens_idx} 诊断报告 ═══"]
+    if cur_effl:
+        lines.append(f"当前参数: FOV={cur_fov}° F/{cur_fnum} EFFL={cur_effl:.2f}mm 近轴RMS={cur_rms:.4f}mm")
+    else:
+        lines.append(f"当前参数: FOV={cur_fov}° F/{cur_fnum} (EFFL未知)")
+
+    # ── 2. 推算目标 EFFL ─────────────────────────────────────────
+    # 优先级: ① effl_target（用户直传）② y_target 推导 ③ 保持 RAG 镜头像高
+    target_effl = None
+    effl_scale  = None
+    lines.append(f"\n目标需求: FOV={fov_target}° F/{fnum_target} RMS<{rms_target}mm")
+    if effl_target and effl_target > 0:
+        target_effl = effl_target
+        effl_scale  = target_effl / cur_effl if cur_effl and cur_effl > 0 else None
+        _y_disp = y_target if y_target else (cur_effl * math.tan(math.radians(fov_target/2)) if cur_effl else "?")
+        lines.append(f"  用户传感器 y={_y_disp:.2f}mm → 目标 EFFL={target_effl:.2f}mm（缩放{effl_scale:.3f}×）[effl_target 直传]")
+    elif y_target and y_target > 0:
+        target_effl = y_target / math.tan(math.radians(fov_target / 2.0))
+        effl_scale  = target_effl / cur_effl if cur_effl and cur_effl > 0 else None
+        lines.append(f"  用户传感器 y={y_target:.2f}mm → 目标 EFFL={target_effl:.2f}mm（缩放{effl_scale:.3f}×）[y_target 推导]")
+    elif cur_effl and cur_effl > 0 and cur_fov > 0:
+        cur_y       = cur_effl * math.tan(math.radians(cur_fov / 2.0))
+        target_effl = cur_y / math.tan(math.radians(fov_target / 2.0))
+        effl_scale  = target_effl / cur_effl
+        lines.append(f"  像高 y={cur_y:.2f}mm → 目标 EFFL={target_effl:.2f}mm（缩放{effl_scale:.3f}×）[RAG镜头像高]")
+    else:
+        lines.append("  ⚠ 无法推算目标EFFL，将由Zemax直接设置FOV")
+
+    # ── 3. 差距逐项分析 ─────────────────────────────────────────
+    lines.append("\n【差距分析】")
+    actions = []  # (工具名, 参数字符串)
+
+    # 3a. EFFL 偏差判断 ★ 只要偏差>15% 就强制 align_effl，与 FOV 是否相同无关
+    fov_delta        = abs(fov_target - cur_fov)
+    effl_mismatch_pct = abs(effl_scale - 1.0) * 100 if effl_scale is not None else 0
+    if target_effl is not None and effl_mismatch_pct > 15.0:
+        reason = "y_target 不匹配" if (y_target and abs(y_target - (cur_effl * math.tan(math.radians(cur_fov/2.0)) if cur_effl and cur_fov else 0)) > 0.5) else f"FOV 差距{fov_delta:.1f}°"
+        lines.append(f"  ① EFFL 偏差 {effl_mismatch_pct:.0f}%: {cur_effl:.1f}mm → {target_effl:.1f}mm（{reason}）")
+        lines.append(f"     → ⚠ 偏差>{15}%，必须先 align_effl")
+        actions.append(("align_effl", f"lens_idx={lens_idx}, target_effl={target_effl:.2f}"))
+    elif fov_delta > 2.0 and target_effl is not None and effl_mismatch_pct > 5.0:
+        lines.append(f"  ① FOV: {cur_fov}° → {fov_target}°  差距={fov_delta:.1f}°，EFFL 偏差{effl_mismatch_pct:.0f}%")
+        lines.append(f"     → 需要 align_effl: {cur_effl:.1f}mm → {target_effl:.1f}mm")
+        actions.append(("align_effl", f"lens_idx={lens_idx}, target_effl={target_effl:.2f}"))
+    else:
+        lines.append(f"  ① FOV/EFFL: {cur_fov}° ≈ 目标{fov_target}°  偏差{effl_mismatch_pct:.0f}%  ✓ 无需调整")
+
+    # 3b. F#
+    fnum_delta_pct = (cur_fnum - fnum_target) / fnum_target * 100 if fnum_target > 0 else 0
+    if abs(fnum_delta_pct) > 5.0:
+        direction = "偏大(光圈不够)" if fnum_delta_pct > 0 else "偏小(光圈过大)"
+        lines.append(f"  ② F#: {cur_fnum} → {fnum_target}  偏差={fnum_delta_pct:+.1f}% {direction}")
+        # 自动找光阑面
+        real_surfs = surfs[1:-1] if len(surfs) >= 3 else surfs
+        stop_cands = [
+            (s.get("surface_num"), float(s.get("semi_diameter", 0)))
+            for s in real_surfs
+            if abs(float(s.get("radius", 0))) > 1e7
+            and str(s.get("material", "AIR")).upper() == "AIR"
+            and float(s.get("semi_diameter", 0)) > 0
+        ]
+        if stop_cands:
+            stop_snum, stop_sd = min(stop_cands, key=lambda x: x[1])
+            # ★ 若会执行 align_effl，SD 会被等比缩放，用物理公式 target_effl/(2×F#) 更准确
+            _will_align = target_effl is not None and effl_scale is not None and abs(effl_scale - 1.0) > 0.05
+            if _will_align and target_effl and target_effl > 0:
+                new_sd = target_effl / (2.0 * fnum_target)
+                lines.append(f"     光阑面=面{int(stop_snum)}  目标SD={new_sd:.2f}mm")
+                lines.append(f"     公式: target_effl({target_effl:.2f}) / (2×F#{fnum_target}) = {new_sd:.2f}  [align_effl后用此值]")
+            else:
+                new_sd = stop_sd * (cur_fnum / fnum_target)
+                lines.append(f"     光阑面=面{int(stop_snum)}  当前SD={stop_sd:.2f}mm → 目标SD={new_sd:.2f}mm")
+                lines.append(f"     公式: {stop_sd:.2f} × ({cur_fnum}/{fnum_target}) = {new_sd:.2f}")
+            actions.append(("modify_lens",
+                f"lens_idx={lens_idx}, surface={int(stop_snum)}, param=semi_diameter, value={new_sd:.3f}"))
+        else:
+            lines.append(f"     ⚠ 未识别到光阑面，需先 get_lens_surfaces 确认 stop 面号")
+            actions.append(("get_lens_surfaces", f"{lens_idx}"))
+    else:
+        lines.append(f"  ② F#: {cur_fnum} ≈ 目标{fnum_target}  偏差{fnum_delta_pct:+.1f}%  ✓ 无需调整")
+
+    # 3c. RMS
+    if cur_rms is not None:
+        rms_margin = cur_rms / rms_target if rms_target > 0 else 0
+        if rms_margin > 5.0:
+            lines.append(f"  ③ 近轴RMS: {cur_rms:.4f}mm（超标{rms_margin:.0f}×）→ 结构差距大，直接 zemax_optimize 不必 local_optimize")
+        elif rms_margin > 1.5:
+            lines.append(f"  ③ 近轴RMS: {cur_rms:.4f}mm（超标{rms_margin:.1f}×）→ 先 local_optimize 再 zemax_optimize")
+        else:
+            lines.append(f"  ③ 近轴RMS: {cur_rms:.4f}mm  ✓ 接近目标，直接 zemax_optimize")
+    else:
+        lines.append(f"  ③ 近轴RMS: 未知，直接 zemax_optimize 获取真值")
+
+    # ── 4. 物理结构检查 ─────────────────────────────────────────
+    lines.append("\n【物理结构检查】")
+    struct_issues = []
+    n_glass = 0
+    for s in surfs[1:-1]:
+        mat  = str(s.get("material", "AIR") or "").upper()
+        t    = float(s.get("thickness", 0))
+        sd   = float(s.get("semi_diameter", 0))
+        snum = int(s.get("surface_num", 0))
+        if mat not in ("", "AIR"):
+            n_glass += 1
+            if 0 < t < 0.5:
+                struct_issues.append(f"  ⚠ 面{snum} 玻璃厚度={t:.2f}mm 过薄(<0.5mm)，制造风险高")
+            if sd > 0 and t / sd > 3.0:
+                struct_issues.append(f"  ⚠ 面{snum} 厚径比={t/sd:.1f}>3，制造困难")
+            if not (mat.startswith("H-") or mat.startswith("D-")):
+                struct_issues.append(f"  ⚠ 面{snum} 材料'{mat}'非CDGM牌号，Zemax可能无法识别")
+
+    if fov_target >= 60 and n_glass < 4:
+        struct_issues.append(f"  ⚠ FOV={fov_target}°但仅{n_glass}片镜，场曲难以校正(建议≥5片)")
+    if fnum_target <= 1.8 and n_glass < 5:
+        struct_issues.append(f"  ⚠ F/{fnum_target}大光圈但仅{n_glass}片镜，球差难以校正(建议≥6片)")
+
+    if struct_issues:
+        lines.extend(struct_issues)
+    else:
+        lines.append(f"  ✓ {n_glass}片镜，未发现明显结构问题")
+
+    # ── 5. 推荐执行顺序 ─────────────────────────────────────────
+    lines.append("\n【推荐执行顺序】")
+    step = 1
+    action_names = [a[0] for a in actions]
+    if "align_effl" in action_names:
+        a = actions[action_names.index("align_effl")]
+        lines.append(f"  {step}. align_effl({a[1]})")
+        step += 1
+    if "get_lens_surfaces" in action_names:
+        lines.append(f"  {step}. get_lens_surfaces({lens_idx})  ← 确认 stop 面号")
+        step += 1
+    if "modify_lens" in action_names:
+        a = actions[action_names.index("modify_lens")]
+        lines.append(f"  {step}. modify_lens({a[1]})")
+        step += 1
+    if cur_rms and rms_target and 1.5 < cur_rms / rms_target <= 5.0:
+        lines.append(f"  {step}. local_optimize(lens_idx={lens_idx})")
+        step += 1
+    lines.append(f"  {step}. zemax_optimize(lens_idx={lens_idx}, cycles=auto, "
+                 f"rms_target={rms_target}, fnum_target={fnum_target}, fov_target={fov_target})")
+    if not actions:
+        lines.append("  (参数已接近目标，可直接 zemax_optimize)")
+
+    return "\n".join(lines)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# check_spec — 从 self_evolve.py 移至此处，消除双向循环导入
+# 原先 self_evolve.check_spec 在函数体内 `from agent_zemax import ALL_LENSES, _calc`，
+# 而 agent_zemax 顶部又 `from self_evolve import check_spec`，形成环。
+# 移过来后直接使用本模块的 ALL_LENSES / _calc；self_evolve 中同名定义已删除。
+# ══════════════════════════════════════════════════════════════════════════════
+@tool
+def check_spec(input_str: str) -> str:
+    """【达标判断】统一判定镜头是否满足用户规格。
+    输入: "lens_idx=<id>, target_effl=<mm>, target_fnum=<F>, rms_pass=<mm>"
+      rms_pass 可省略，默认 1.0mm
+    返回 JSON: {"pass": bool, "metrics": {...}, "reasons": [...], "next": "..."}
+    """
+    import re as _re
+    try:
+        parts = {}
+        for seg in str(input_str).strip().split(","):
+            seg = seg.strip()
+            if "=" in seg:
+                k, v = seg.split("=", 1)
+                parts[k.strip()] = v.strip()
+        lens_idx    = int(parts["lens_idx"])
+        target_effl = float(parts["target_effl"]) if parts.get("target_effl") else None
+        target_fnum = float(parts["target_fnum"]) if parts.get("target_fnum") else None
+        # 优先用调用方传入的 rms_pass，缺省才用默认值
+        rms_pass    = float(parts["rms_pass"]) if parts.get("rms_pass") else DEFAULT_RMS_PASS_MM
+    except Exception as e:
+        return json.dumps({"pass": False, "error": f"输入格式错误: {e}"}, ensure_ascii=False)
+
+    _err = _check_lens_bounds(lens_idx)
+    if _err:
+        return json.dumps({"pass": False, "error": _err}, ensure_ascii=False)
+
+    lens = ALL_LENSES[lens_idx]
+    r = _calc(lens)
+    if not r.get("valid"):
+        return json.dumps({
+            "pass": False,
+            "reasons": [f"追迹失败: {r.get('msg')}"],
+            "next": "reset_lens",
+        }, ensure_ascii=False)
+
+    rms      = float(r.get("rms", 1e9))
+    effl_cur = float(r.get("effl", 0.0))
+    fnum_cur = float(lens.get("fnum") or 0.0)
+
+    reasons = []
+    if rms > rms_pass:
+        reasons.append(f"RMS={rms:.4f}mm 超过放行阈值{rms_pass}mm")
+    if target_effl is not None and target_effl > 0:
+        dev = abs(effl_cur - target_effl) / abs(target_effl) * 100.0
+        if dev > EFFL_TOL_PCT:
+            reasons.append(f"EFFL={effl_cur:.2f}mm vs 目标{target_effl}mm 偏差{dev:.1f}%>2%")
+    if target_fnum is not None and target_fnum > 0:
+        if fnum_cur > target_fnum * (1 + FNUM_TOL_PCT / 100.0):
+            dev = (fnum_cur - target_fnum) / abs(target_fnum) * 100.0
+            reasons.append(f"F#={fnum_cur} vs 目标{target_fnum} 偏大{dev:.1f}%>2%")
+
+    passed = len(reasons) == 0
+
+    infeasible = []
+    for _reason in reasons:
+        _m = _re.search(r'偏差([\d.]+)%', _reason)
+        if not _m:
+            continue
+        _dev = float(_m.group(1))
+        if 'F#' in _reason and _dev > 30:
+            infeasible.append(f'F#差距{_dev:.0f}%超出local_optimize能力,需换候选')
+        elif 'FOV' in _reason and _dev > 50:
+            infeasible.append(f'FOV差距{_dev:.0f}%需换结构,无法通过优化修复')
+
+    # Fix #5: passed=True 说明近轴已全部达标。
+    # "zemax_optimize_or_final_answer"明确告知 Agent 可直接输出结论，
+    # 无需强制再跑 Zemax（zemax_offline 场景下尤其重要）。
+    if passed:
+        nxt = "zemax_optimize_or_final_answer"
+    elif any("EFFL" in x for x in reasons):
+        nxt = "align_effl"
+    elif any("RMS" in x for x in reasons):
+        nxt = "local_optimize"
+    else:
+        nxt = "continue_optimize"
+    if infeasible:
+        nxt = "try_next_candidate_or_final_answer"
+
+    _SESSION_CTX["last_check"] = {
+        "lens_idx": lens_idx, "pass": passed,
+        "rms": rms, "effl": effl_cur, "fnum": fnum_cur,
+        "reasons": reasons, "source": "paraxial_check_spec",
+    }
+    if target_effl: _SESSION_CTX.setdefault("target_spec", {})["effl"] = target_effl
+    if target_fnum: _SESSION_CTX.setdefault("target_spec", {})["fnum"] = target_fnum
+    _SESSION_CTX.setdefault("target_spec", {})["rms_pass"] = rms_pass
+
+    try:
+        record_step("check_spec", lens_idx,
+                    {"target_effl": target_effl, "target_fnum": target_fnum,
+                     "pass": passed, "rms_paraxial": round(rms, 4),
+                     "effl_cur": round(effl_cur, 2), "fnum_cur": fnum_cur,
+                     "reasons": reasons, "next": nxt,
+                     "note": "近轴追迹(F/1.2 大孔径下与真值可差 >10x)"},
+                    kind="decide")
+    except Exception:
+        pass
+
+    return json.dumps({
+        "pass": passed,
+        "metrics": {"rms": round(rms, 4), "effl": round(effl_cur, 2), "fnum": fnum_cur},
+        "reasons": reasons,
+        "infeasible": infeasible,
+        "next": nxt,
+    }, ensure_ascii=False)
+
+
+@tool
+def auto_fix_physics(input_str: str) -> str:
+    """检索/修改镜头后，自动扫描并修复物理不合理的面型参数。
+    输入: "lens_idx=X" 或 "lens_idx=X, fnum_target=2.0, effl_target=24.0"
+    修复内容（按顺序执行）：
+      ① 非CDGM牌号 → 按nd/Vd最近邻自动替换为H-*牌号
+      ② 玻璃厚度<0.5mm → 补足，同时缩短相邻空气间隔保持TOTR不变
+      ③ 空气间隔<0.1mm（透镜穿插）→ 补足，同时压缩相邻玻璃厚度
+      ④ 光阑SD与目标F#不符（偏差>10%）→ 按 EFFL/(2×F#) 修正
+    每个修复动作都通过 record_step 写入轨迹，供 self_evolve 蒸馏。
+    """
+    import ast, copy, math
+
+    # ── 解析输入 ────────────────────────────────────────────────
+    try:
+        input_str = str(input_str).strip().strip(chr(34)).strip(chr(39))
+        parts = {}
+        for seg in input_str.split(","):
+            seg = seg.strip()
+            if "=" in seg:
+                k, v = seg.split("=", 1)
+                parts[k.strip()] = v.strip()
+        lens_idx    = int(parts["lens_idx"])
+        fnum_target = float(parts["fnum_target"]) if "fnum_target" in parts else None
+        effl_target = float(parts["effl_target"]) if "effl_target" in parts else None
+    except Exception as e:
+        return f"输入格式错误: {e}\n正确格式: lens_idx=X 或 lens_idx=X, fnum_target=2.0"
+
+    _err = _check_lens_bounds(lens_idx)
+    if _err:
+        return _err
+
+    lens  = ALL_LENSES[lens_idx]
+    surfs = lens.get("surfaces", [])
+    if isinstance(surfs, str):
+        surfs = ast.literal_eval(surfs)
+        lens["surfaces"] = surfs
+
+    # 备份（首次）
+    if lens_idx not in _LENS_BACKUP:
+        _LENS_BACKUP[lens_idx] = copy.deepcopy(lens)
+
+    # 修复前基线
+    r0 = _calc(lens)
+    metrics_base = {"rms": r0.get("rms"), "effl": r0.get("effl")} if r0.get("valid") else {}
+
+    fixes = []   # 记录修复日志
+    total_rms_gain = 0.0
+
+    # ── CDGM 近邻替换表（nd, Vd） ────────────────────────────────
+    # 覆盖最常见的非CDGM牌号，按折射率分组
+    _CDGM_SUBS = {
+        # Schott → CDGM
+        "N-BK7":    ("H-K9L",      1.5168, 64.2),
+        "N-FK51A":  ("H-FK61",     1.4875, 70.4),
+        "N-FK5":    ("H-FK61",     1.4875, 70.4),
+        "N-PK52A":  ("H-FK71",     1.4880, 84.5),
+        "N-LAK22":  ("H-LAK52",    1.6516, 58.5),
+        "N-LAK34":  ("H-LAK7",     1.6516, 58.5),
+        "N-LASF9":  ("H-ZLAF55D",  1.8348, 42.7),
+        "N-SF6":    ("H-ZF6",      1.8052, 25.4),
+        "N-SF11":   ("H-ZF7LA",    1.7847, 26.1),
+        "N-SF57":   ("H-ZF52",     1.8467, 23.8),
+        "N-SSK5":   ("H-ZK9",      1.6583, 49.7),
+        "N-BAK4":   ("H-BAK4",     1.5688, 56.1),
+        "N-SK16":   ("H-ZK21",     1.6200, 60.3),
+        # OHARA → CDGM
+        "S-BSL7":   ("H-K9L",      1.5168, 64.2),
+        "S-FPL51":  ("H-FK61",     1.4875, 70.4),
+        "S-FPL53":  ("H-FK71",     1.4880, 84.5),
+        "S-LAH55":  ("H-ZLAF55D",  1.8348, 42.7),
+        "S-TIH53":  ("H-ZF52",     1.8467, 23.8),
+        # HOYA
+        "FC5":      ("H-FK61",     1.4875, 70.4),
+        "FCD10":    ("H-FK71",     1.4880, 84.5),
+        "TAFD37":   ("H-ZLAF55D",  1.8348, 42.7),
+    }
+
+    # 通用近邻查找（对替换表没有的牌号，按 nd 最近邻）
+    _CDGM_LIBRARY = [
+        ("H-K9L",     1.5168, 64.2),  ("H-ZK3",     1.5891, 61.2),
+        ("H-ZK9",     1.6583, 49.7),  ("H-ZK21",    1.6200, 60.3),
+        ("H-BAK4",    1.5688, 56.1),  ("H-LAK52",   1.6516, 58.5),
+        ("H-LAK7",    1.6516, 58.5),  ("H-LALF5",   1.6814, 54.8),
+        ("H-LAF10LA", 1.7550, 52.3),  ("H-LAF3B",   1.7170, 47.9),
+        ("H-ZLAF55D", 1.8348, 42.7),  ("H-ZLAF2A",  1.8030, 46.6),
+        ("H-FK61",    1.4875, 70.4),  ("H-FK71",    1.4880, 84.5),
+        ("H-ZF4A",    1.7283, 28.7),  ("H-ZF6",     1.8052, 25.4),
+        ("H-ZF7LA",   1.7847, 26.1),  ("H-ZF52",    1.8467, 23.8),
+        ("H-QK3LA",   1.4970, 81.6),  ("D-LAF50",   1.7440, 44.8),
+        ("D-ZK3",     1.5861, 60.5),
+    ]
+
+    def _nearest_cdgm(mat_str):
+        """按 nd 最近邻返回 CDGM 牌号。直接查表，查不到做近邻。"""
+        up = mat_str.upper().strip()
+        if up in _CDGM_SUBS:
+            return _CDGM_SUBS[up][0]
+        # 尝试从 optical_calculator 读 nd
+        nd_ref = None
+        try:
+            import optical_calculator as _oc
+            lib = _oc.CDGMLibrary()
+            nd_ref = lib.get_index(mat_str)
+        except Exception:
+            pass
+        if nd_ref is None:
+            return None  # 无法确定，不替换
+        # nd 最近邻
+        best, best_d = _CDGM_LIBRARY[0][0], 1e9
+        for name, nd, vd in _CDGM_LIBRARY:
+            d = abs(nd - nd_ref)
+            if d < best_d:
+                best_d, best = d, name
+        return best if best_d < 0.05 else None  # nd 差距>0.05 不替换，避免乱改
+
+    # ═══════════════════════════════════════════════
+    # ① 非CDGM牌号替换
+    # ═══════════════════════════════════════════════
+    real_surfs = surfs[1:-1]  # 跳过 object/image
+    for s in real_surfs:
+        mat = str(s.get("material", "") or "").strip()
+        if not mat or mat.upper() == "AIR":
+            continue
+        if mat.upper().startswith("H-") or mat.upper().startswith("D-"):
+            continue  # 已是CDGM
+        new_mat = _nearest_cdgm(mat)
+        if new_mat is None:
+            fixes.append(f"⚠ 面{int(s.get('surface_num',0))} 材料'{mat}'无法识别近邻CDGM，跳过")
+            continue
+        r_before = _calc(lens)
+        mb = {"rms": r_before.get("rms"), "effl": r_before.get("effl")} if r_before.get("valid") else {}
+        old_mat = mat
+        s["material"] = new_mat
+        r_after = _calc(lens)
+        ma = {"rms": r_after.get("rms"), "effl": r_after.get("effl")} if r_after.get("valid") else {}
+        delta = (mb.get("rms") or 0) - (ma.get("rms") or 0)
+        total_rms_gain += delta if delta else 0
+        try:
+            record_step("auto_fix_physics", lens_idx,
+                        {"fix": "non_cdgm", "surface": int(s.get("surface_num", 0)),
+                         "old_material": old_mat, "new_material": new_mat},
+                        metrics_before=mb, metrics_after=ma, kind="write",
+                        note=f"非CDGM替换: {old_mat}→{new_mat}")
+        except Exception:
+            pass
+        fixes.append(f"✓ 面{int(s.get('surface_num',0))} 材料 {old_mat}→{new_mat}  ΔRMS={delta:+.4f}mm")
+
+    # ═══════════════════════════════════════════════
+    # ② 玻璃厚度过薄（<0.5mm）→ 补足，压缩后一个空气间隔
+    # ═══════════════════════════════════════════════
+    for idx_s, s in enumerate(real_surfs):
+        mat = str(s.get("material", "") or "").upper()
+        if mat in ("", "AIR"):
+            continue
+        t   = float(s.get("thickness", 0))
+        sd  = float(s.get("semi_diameter", 0))
+        snum = int(s.get("surface_num", 0))
+        min_t = max(0.8, sd * 0.08)   # 下限：0.8mm 或 SD×8%，取大者
+        if t >= 0.5:
+            continue
+        delta_t = min_t - t
+        r_before = _calc(lens)
+        mb = {"rms": r_before.get("rms"), "effl": r_before.get("effl")} if r_before.get("valid") else {}
+        s["thickness"] = min_t
+        # 把增加的厚度从后一个空气间隔里扣回来（保持TOTR）
+        for s2 in real_surfs[idx_s+1:]:
+            mat2 = str(s2.get("material", "") or "").upper()
+            t2   = float(s2.get("thickness", 0))
+            if mat2 in ("", "AIR") and t2 > delta_t + 0.2:
+                s2["thickness"] = t2 - delta_t
+                break
+        r_after = _calc(lens)
+        ma = {"rms": r_after.get("rms"), "effl": r_after.get("effl")} if r_after.get("valid") else {}
+        delta = (mb.get("rms") or 0) - (ma.get("rms") or 0)
+        total_rms_gain += delta if delta else 0
+        try:
+            record_step("auto_fix_physics", lens_idx,
+                        {"fix": "thin_glass", "surface": snum,
+                         "old_t": round(t, 3), "new_t": round(min_t, 3)},
+                        metrics_before=mb, metrics_after=ma, kind="write",
+                        note=f"玻璃过薄修复: 面{snum} {t:.2f}→{min_t:.2f}mm")
+        except Exception:
+            pass
+        fixes.append(f"✓ 面{snum} 玻璃厚度 {t:.2f}→{min_t:.2f}mm  ΔRMS={delta:+.4f}mm")
+
+    # ═══════════════════════════════════════════════
+    # ③ 空气间隔<0.1mm（透镜穿插）→ 补足，压缩相邻玻璃厚度
+    # ═══════════════════════════════════════════════
+    for idx_s, s in enumerate(real_surfs):
+        mat = str(s.get("material", "") or "").upper()
+        if mat not in ("", "AIR"):
+            continue
+        t    = float(s.get("thickness", 0))
+        snum = int(s.get("surface_num", 0))
+        if t >= 0.1:
+            continue
+        new_t = 0.3
+        delta_t = new_t - t
+        r_before = _calc(lens)
+        mb = {"rms": r_before.get("rms"), "effl": r_before.get("effl")} if r_before.get("valid") else {}
+        s["thickness"] = new_t
+        # 从相邻玻璃面各扣一半
+        compensated = False
+        for s2 in real_surfs[idx_s+1:]:
+            mat2 = str(s2.get("material", "") or "").upper()
+            t2   = float(s2.get("thickness", 0))
+            if mat2 not in ("", "AIR") and t2 > delta_t * 0.5 + 0.5:
+                s2["thickness"] = t2 - delta_t * 0.5
+                compensated = True
+                break
+        if not compensated:
+            # 找前面的玻璃面
+            for s2 in reversed(real_surfs[:idx_s]):
+                mat2 = str(s2.get("material", "") or "").upper()
+                t2   = float(s2.get("thickness", 0))
+                if mat2 not in ("", "AIR") and t2 > delta_t * 0.5 + 0.5:
+                    s2["thickness"] = t2 - delta_t * 0.5
+                    break
+        r_after = _calc(lens)
+        ma = {"rms": r_after.get("rms"), "effl": r_after.get("effl")} if r_after.get("valid") else {}
+        delta = (mb.get("rms") or 0) - (ma.get("rms") or 0)
+        total_rms_gain += delta if delta else 0
+        try:
+            record_step("auto_fix_physics", lens_idx,
+                        {"fix": "air_gap", "surface": snum,
+                         "old_t": round(t, 3), "new_t": round(new_t, 3)},
+                        metrics_before=mb, metrics_after=ma, kind="write",
+                        note=f"透镜穿插修复: 面{snum} 间隔{t:.2f}→{new_t:.2f}mm")
+        except Exception:
+            pass
+        fixes.append(f"✓ 面{snum} 空气间隔 {t:.2f}→{new_t:.2f}mm  ΔRMS={delta:+.4f}mm")
+
+    # ═══════════════════════════════════════════════
+    # ④ 光阑SD与目标F#不符（偏差>10%）→ 修正
+    # ═══════════════════════════════════════════════
+    if fnum_target is not None and fnum_target > 0:
+        r_cur = _calc(lens)
+        cur_effl = r_cur.get("effl") if r_cur.get("valid") else (effl_target or lens.get("calc_effl"))
+        if cur_effl and cur_effl > 0:
+            ideal_stop_sd = cur_effl / (2.0 * fnum_target)
+            # 找光阑面
+            stop_cands = [
+                (s.get("surface_num"), float(s.get("semi_diameter", 0)), s)
+                for s in real_surfs
+                if abs(float(s.get("radius", 0))) > 1e7
+                and str(s.get("material", "AIR")).upper() == "AIR"
+                and float(s.get("semi_diameter", 0)) > 0
+            ]
+            if stop_cands:
+                stop_snum, stop_sd, stop_surf = min(stop_cands, key=lambda x: x[1])
+                deviation = abs(stop_sd - ideal_stop_sd) / ideal_stop_sd
+                if deviation > 0.10:
+                    r_before = _calc(lens)
+                    mb = {"rms": r_before.get("rms"), "effl": r_before.get("effl")} if r_before.get("valid") else {}
+                    old_sd = stop_sd
+                    stop_surf["semi_diameter"] = round(ideal_stop_sd, 3)
+                    # 同步更新 lens["fnum"]
+                    cur_fnum = float(lens.get("fnum", 0))
+                    if cur_fnum > 0 and old_sd > 0:
+                        lens["fnum"] = round(cur_fnum * (old_sd / ideal_stop_sd), 3)
+                    r_after = _calc(lens)
+                    ma = {"rms": r_after.get("rms"), "effl": r_after.get("effl")} if r_after.get("valid") else {}
+                    delta = (mb.get("rms") or 0) - (ma.get("rms") or 0)
+                    total_rms_gain += delta if delta else 0
+                    try:
+                        record_step("auto_fix_physics", lens_idx,
+                                    {"fix": "stop_sd", "surface": int(stop_snum),
+                                     "old_sd": round(old_sd, 3), "new_sd": round(ideal_stop_sd, 3),
+                                     "fnum_target": fnum_target, "effl": round(cur_effl, 2)},
+                                    metrics_before=mb, metrics_after=ma, kind="write",
+                                    note=f"光阑SD修正: 面{int(stop_snum)} {old_sd:.2f}→{ideal_stop_sd:.2f}mm "
+                                         f"(EFFL={cur_effl:.1f}/2×F{fnum_target})")
+                    except Exception:
+                        pass
+                    fixes.append(f"✓ 面{int(stop_snum)} 光阑SD {old_sd:.2f}→{ideal_stop_sd:.2f}mm "
+                                 f"(偏差{deviation*100:.0f}%)  ΔRMS={delta:+.4f}mm")
+
+    # ── 汇总输出 ─────────────────────────────────────────────────
+    if not fixes:
+        return f"✓ 镜头#{lens_idx} 物理检查通过，无需修复。"
+
+    r_final = _calc(lens)
+    rms_final = r_final.get("rms") if r_final.get("valid") else None
+    rms_base  = metrics_base.get("rms")
+
+    lines = [f"auto_fix_physics 完成 镜头#{lens_idx}  共{len(fixes)}项修复:"]
+    lines.extend(fixes)
+    if rms_base is not None and rms_final is not None:
+        lines.append(f"\n近轴RMS: {rms_base:.4f} → {rms_final:.4f}mm  累计改善{total_rms_gain:+.4f}mm")
+    lines.append("修复路径已通过 record_step 写入轨迹，供 self_evolve 蒸馏。")
+    lines.append("下一步: 继续按 assess_and_plan 的推荐顺序执行。")
+    return "\n".join(lines)
+
+
+
+
+@tool
 def random_restart(input_str: str) -> str:
     """随机扰动参数跳出局部极小。输入: "lens_idx=X, strength=0.05"。"""
     # ★ P14 熔断
@@ -920,10 +1660,9 @@ def random_restart(input_str: str) -> str:
     except Exception as e:
         return f"输入格式错误: {e}. 正确格式: lens_idx=36237, strength=0.05"
 
-    if not ALL_LENSES:
-        return "镜头数据未加载"
-    if lens_idx < 0 or lens_idx >= len(ALL_LENSES):
-        return f"lens_idx {lens_idx} 越界"
+    _err = _check_lens_bounds(lens_idx)
+    if _err:
+        return _err
 
     lens  = ALL_LENSES[lens_idx]
     surfs = lens.get("surfaces", [])
@@ -998,10 +1737,9 @@ def split_lens(input_str: str) -> str:
     except Exception as e:
         return f"输入格式错误: {e}. 示例: lens_idx=36237, surface=6, ratio=0.5"
 
-    if not ALL_LENSES:
-        return "镜头数据未加载"
-    if lens_idx < 0 or lens_idx >= len(ALL_LENSES):
-        return f"lens_idx {lens_idx} 越界"
+    _err = _check_lens_bounds(lens_idx)
+    if _err:
+        return _err
 
     lens  = ALL_LENSES[lens_idx]
     surfs = lens.get("surfaces", [])
@@ -1133,6 +1871,226 @@ def split_lens(input_str: str) -> str:
             "建议接着调用 local_optimize 对新面型做梯度优化。")
 
 
+
+@tool
+def add_element(input_str: str) -> str:
+    """在指定位置插入一片薄透镜元件。
+    输入: "lens_idx=X, after_surface=Y, material=H-K9L, radius=50.0, thickness=2.0"
+    after_surface: 新镜片插在该面号之后。
+    material 默认 H-K9L，radius 默认 50.0mm，thickness 默认 2.0mm。
+    用途: FOV>60° 片数不足 / RMS 平台期无法突破 / 用户指定增加片数。
+    """
+    import ast, copy, math
+    try:
+        input_str = str(input_str).strip().strip(chr(34)).strip(chr(39))
+        parts = {}
+        for seg in input_str.split(","):
+            seg = seg.strip()
+            if "=" in seg:
+                k, v = seg.split("=", 1)
+                parts[k.strip()] = v.strip()
+        lens_idx      = int(parts["lens_idx"])
+        after_surface = int(parts["after_surface"])
+        material      = parts.get("material", "H-K9L")
+        radius        = float(parts.get("radius", "50.0"))
+        thickness     = float(parts.get("thickness", "2.0"))
+    except Exception as e:
+        return f"输入格式错误: {e}\n示例: lens_idx=36237, after_surface=6, material=H-K9L, radius=50.0"
+
+    _err = _check_lens_bounds(lens_idx)
+    if _err:
+        return _err
+
+    lens  = ALL_LENSES[lens_idx]
+    surfs = lens.get("surfaces", [])
+    if isinstance(surfs, str):
+        surfs = ast.literal_eval(surfs)
+        lens["surfaces"] = surfs
+
+    if lens_idx not in _LENS_BACKUP:
+        _LENS_BACKUP[lens_idx] = copy.deepcopy(lens)
+
+    # 找插入位置
+    insert_after_idx = None
+    for i, s in enumerate(surfs):
+        if int(s.get("surface_num", -1)) == after_surface:
+            insert_after_idx = i
+            break
+    if insert_after_idx is None:
+        available = [int(s.get("surface_num", 0)) for s in surfs]
+        return f"面号 {after_surface} 不存在，可用面号: {available}"
+
+    # 参考邻面的 semi_diameter
+    ref_sd = float(surfs[insert_after_idx].get("semi_diameter", 5.0) or 5.0)
+
+    # 构造新镜片的两个面（前面 + 后面）
+    # 先把后续面号全部 +2
+    new_surfs = []
+    for i, s in enumerate(surfs):
+        snum = int(s.get("surface_num", i))
+        if i <= insert_after_idx:
+            new_surfs.append(s)
+        else:
+            s2 = dict(s)
+            s2["surface_num"] = snum + 2
+            new_surfs.append(s2)
+
+    # 前一个空气间隔压缩 thickness+0.5 给新镜片留空间
+    if insert_after_idx >= 0:
+        prev = new_surfs[insert_after_idx]
+        prev_t = float(prev.get("thickness", 0))
+        gap_before = 0.3
+        gap_after  = 0.3
+        consume    = thickness + gap_before + gap_after
+        if prev_t > consume + 0.5:
+            new_surfs[insert_after_idx] = dict(prev)
+            new_surfs[insert_after_idx]["thickness"] = prev_t - consume
+
+    base_snum = after_surface + 1
+    face_front = {
+        "surface_num":   base_snum,
+        "radius":        radius,
+        "thickness":     thickness,
+        "material":      material,
+        "semi_diameter": ref_sd,
+    }
+    face_back = {
+        "surface_num":   base_snum + 1,
+        "radius":        -radius,       # 双凸对称起点
+        "thickness":     gap_after if insert_after_idx >= 0 else 0.3,
+        "material":      "AIR",
+        "semi_diameter": ref_sd,
+    }
+
+    # 插入
+    insert_pos = insert_after_idx + 1
+    new_surfs.insert(insert_pos, face_front)
+    new_surfs.insert(insert_pos + 1, face_back)
+
+    # 重新整理面号
+    for i, s in enumerate(new_surfs):
+        s["surface_num"] = i
+
+    lens["surfaces"] = new_surfs
+
+    r = _calc(lens)
+    rms_str  = f"{r['rms']:.4f}mm" if r.get("valid") else f"追迹失败({r.get('msg','')})"
+    effl_str = f"{r['effl']:.2f}mm" if r.get("valid") else "N/A"
+    n_glass  = sum(1 for s in new_surfs
+                   if s.get("material") and str(s["material"]).upper() not in ("AIR",""))
+
+    try:
+        record_step("add_element", lens_idx,
+                    {"after_surface": after_surface, "material": material,
+                     "radius": radius, "thickness": thickness},
+                    kind="write")
+    except Exception:
+        pass
+
+    return (f"✓ 镜头#{lens_idx} 在面{after_surface}后插入新元件\n"
+            f"  材料={material}  radius={radius}mm  thickness={thickness}mm\n"
+            f"  现共 {n_glass} 片  EFFL={effl_str}  近轴RMS={rms_str}\n"
+            f"建议: local_optimize 或直接 zemax_optimize 微调新面型。")
+
+
+@tool
+def remove_element(input_str: str) -> str:
+    """删除指定玻璃元件（两个相邻的玻璃面+中间的空气间隔）。
+    输入: "lens_idx=X, element=N"
+    element: 要删除的玻璃面的起始面号（material != AIR 的面号）。
+    用途: 用户要求减少片数 / 结构过复杂 / 某片镜对性能贡献极小。
+    """
+    import ast, copy
+    try:
+        input_str = str(input_str).strip().strip(chr(34)).strip(chr(39))
+        parts = {}
+        for seg in input_str.split(","):
+            seg = seg.strip()
+            if "=" in seg:
+                k, v = seg.split("=", 1)
+                parts[k.strip()] = v.strip()
+        lens_idx   = int(parts["lens_idx"])
+        target_snum = int(parts["element"])
+    except Exception as e:
+        return f"输入格式错误: {e}\n示例: lens_idx=36237, element=5"
+
+    _err = _check_lens_bounds(lens_idx)
+    if _err:
+        return _err
+
+    lens  = ALL_LENSES[lens_idx]
+    surfs = lens.get("surfaces", [])
+    if isinstance(surfs, str):
+        surfs = ast.literal_eval(surfs)
+        lens["surfaces"] = surfs
+
+    if lens_idx not in _LENS_BACKUP:
+        _LENS_BACKUP[lens_idx] = copy.deepcopy(lens)
+
+    # 找目标玻璃面
+    target_idx = None
+    for i, s in enumerate(surfs):
+        mat = str(s.get("material","AIR") or "AIR").upper()
+        if int(s.get("surface_num", -1)) == target_snum and mat not in ("", "AIR"):
+            target_idx = i
+            break
+    if target_idx is None:
+        glass_surfs = [(int(s.get("surface_num",0)), s.get("material",""))
+                       for s in surfs
+                       if str(s.get("material","AIR") or "AIR").upper() not in ("","AIR")]
+        return (f"面号 {target_snum} 不是玻璃面或不存在。\n"
+                f"玻璃面列表: {glass_surfs}")
+
+    # 找紧跟其后的空气面（即该元件的后表面）
+    # 一片镜头 = 玻璃面(thickness=玻璃厚) + 其后续空气面(thickness=空气间隔)
+    # 我们删掉这两行，并把删掉的总厚度补到前一个空气间隔里
+    remove_indices = [target_idx]
+    glass_thickness = float(surfs[target_idx].get("thickness", 0))
+    extra_thickness = glass_thickness  # 要补给前面空气间隔的厚度
+
+    # 找后续空气面（下一个 AIR 面）
+    if target_idx + 1 < len(surfs):
+        next_s = surfs[target_idx + 1]
+        next_mat = str(next_s.get("material","AIR") or "AIR").upper()
+        if next_mat in ("", "AIR"):
+            remove_indices.append(target_idx + 1)
+            extra_thickness += float(next_s.get("thickness", 0))
+
+    # 把厚度补给前一个面
+    if target_idx > 0:
+        prev = surfs[target_idx - 1]
+        surfs[target_idx - 1] = dict(prev)
+        surfs[target_idx - 1]["thickness"] = float(prev.get("thickness", 0)) + extra_thickness
+
+    # 删除目标面（倒序删，保持索引稳定）
+    for idx in sorted(remove_indices, reverse=True):
+        surfs.pop(idx)
+
+    # 重新整理面号
+    for i, s in enumerate(surfs):
+        s["surface_num"] = i
+
+    lens["surfaces"] = surfs
+
+    r = _calc(lens)
+    rms_str  = f"{r['rms']:.4f}mm" if r.get("valid") else f"追迹失败({r.get('msg','')})"
+    effl_str = f"{r['effl']:.2f}mm" if r.get("valid") else "N/A"
+    n_glass  = sum(1 for s in surfs
+                   if s.get("material") and str(s["material"]).upper() not in ("AIR",""))
+
+    try:
+        record_step("remove_element", lens_idx,
+                    {"removed_surface": target_snum},
+                    kind="write")
+    except Exception:
+        pass
+
+    return (f"✓ 镜头#{lens_idx} 已删除面{target_snum}元件\n"
+            f"  现共 {n_glass} 片  EFFL={effl_str}  近轴RMS={rms_str}\n"
+            f"建议: local_optimize 或 zemax_optimize 重新优化。")
+
+
+
 @tool
 def local_optimize(input_str: str) -> str:
     """对所有玻璃面 radius 做梯度下降降 RMS。输入: "lens_idx=X" (可选 iterations=30, lr=0.5)。"""
@@ -1169,10 +2127,9 @@ def local_optimize(input_str: str) -> str:
     except Exception as e:
         return f"输入格式错误: {e}. 示例: lens_idx=36237, iterations=30, lr=0.5"
 
-    if not ALL_LENSES:
-        return "镜头数据未加载"
-    if lens_idx < 0 or lens_idx >= len(ALL_LENSES):
-        return f"lens_idx {lens_idx} 越界"
+    _err = _check_lens_bounds(lens_idx)
+    if _err:
+        return _err
 
     stall_key = lens_idx  # 停滞计数器 key
 
@@ -1316,6 +2273,36 @@ def local_optimize(input_str: str) -> str:
     except Exception:
         pass
 
+    # ★ ZMX 存档：local_optimize 完成后，把当前近轴最优面型推入 Zemax 并保存
+    # 仅当 Zemax 可用且优化有实质改善时执行（improvement > 0.1%）
+    if improvement > 0.1 and _zemax_available():
+        try:
+            import requests as _req_lo
+            _fov_lo  = lens.get("fov", 30)
+            _fnum_lo = lens.get("fnum", 2.8)
+            _surfs_lo = lens.get("surfaces", [])
+            _resp_lo = _req_lo.post(
+                f"{ZEMAX_BRIDGE}/load_lens",
+                json={"surfaces": _sanitize_surfs(_surfs_lo),
+                      "fov": _fov_lo, "fnum": _fnum_lo,
+                      "stop_surface": lens.get("stop_surface")},
+                headers=_NGROK_HEADERS,
+                timeout=15,
+            )
+            if _resp_lo.ok:
+                _save_zmx_snapshot(lens_idx, "post_local_opt")
+                print(f"[local_optimize] ✓ ZMX 已存档 (post_local_opt, lens#{lens_idx})", flush=True)
+            else:
+                print(f"[local_optimize] ⚠ load_lens 失败 HTTP {_resp_lo.status_code}，跳过 ZMX 存档", flush=True)
+        except Exception as _zmx_e:
+            print(f"[local_optimize] ⚠ ZMX 存档失败（不影响优化结果）: {_zmx_e}", flush=True)
+
+    # ★ 自动抓图：local_optimize 完成后，layout + spot diagram
+    try:
+        _auto_capture(lens_idx, "post_local_opt")
+    except Exception as _cap_e:
+        print(f"[local_optimize] ⚠ 自动抓图失败（不影响结果）: {_cap_e}", flush=True)
+
     return f"优化完成#{lens_idx} RMS:{rms_init:.4f}→{rms_final:.4f}mm 改善{improvement:.0f}% EFFL:{effl_final:.2f}mm"
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1347,21 +2334,41 @@ SYSTEM_PROMPT = """/no_think
 
 # 流程决策树
 
-1. **检索**: 用户给 FOV+F# 数值 → rank_by_rms(加 fov_tol/fnum_tol,如 "FOV=35 F/2.8, fov_tol=5, fnum_tol=0.5")
-   未给数值 → 先 interpret_requirement 一次
+1. **检索**: 用户给 F# 数值 → 直接 rank_by_rms("FOV=X F/Y, fov_tol=10, fnum_tol=0.5")
+   - ★★ 查询中已含 FOV=X°、F/Y、RMS<Z 等明确数字 → 【直接 rank_by_rms】，严禁调用 interpret_requirement
+   - interpret_requirement 仅用于"天文摄影"、"手机摄像头"等纯模糊描述，有数字就跳过
+   - FOV 只用于检索排序，不触发 OOD；F# 偏差大才触发 warning
+   - ★ 用户给的 FOV 会在 zemax_optimize 里通过 fov_target 直接传给 Zemax，无需数据库匹配
+   未给任何数值（纯文字描述）→ 先 interpret_requirement 一次
    rank_by_rms 若带 warning → 不再检索,取 rank=1 直接用
 
-2. **焦距对齐**: 用户指定 EFFL 或 当前 EFFL > 目标×1.3 → align_effl
+2. **分析与计划**: rank_by_rms 返回候选后，【必须】先调一次 assess_and_plan 分析差距
+   输入: assess_and_plan("lens_idx=X, fov_target=<FOV>, fnum_target=<F#>, rms_target=<RMS>")
+   ★ 若查询含"y=X mm"或"半像高 y=X"，必须加入 y_target=X（单位mm），例:
+     assess_and_plan("lens_idx=N, fov_target=5, fnum_target=2.0, rms_target=0.04, y_target=3.36")
+     内部自动推导 effl_target=y/tan(FOV/2)，EFFL 偏差>15% 时强制 align_effl（无论 FOV 是否匹配）。
+   输出会给出: ① FOV/EFFL 差距及是否需要 align_effl  ② F# 差距及光阑面计算  ③ 近轴RMS评估  ④ 物理结构问题  ⑤ 推荐执行顺序
+   严格按照 assess_and_plan 输出的【推荐执行顺序】执行，不得跳步或自行发明顺序。
+
+2b. **物理自修复**: assess_and_plan 之后，【必须】调一次 auto_fix_physics
+   输入: auto_fix_physics("lens_idx=X, fnum_target=<F#>, effl_target=<EFFL>")
+   自动修复: ①非CDGM牌号替换 ②玻璃过薄补厚 ③透镜穿插消除 ④光阑SD修正
+   每项修复都写入 self_evolve 轨迹，供蒸馏学习。
+   若返回"无需修复"则直接进入步骤3。
+
+3. **焦距对齐**: assess_and_plan 建议 align_effl 时才调用
    align_effl 偏差>85% → 换 rank=2 候选,勿再检索
 
-3. **评估**: align_effl 已返回近轴 RMS，无需再调 rms_calculator（省 token）
+4. **评估**: align_effl 已返回近轴 RMS，无需再调 rms_calculator（省 token）
 
-4. **优化**:
-   - F# 偏大: 先调 get_lens_surfaces 找 stop 面号，再 modify_lens 改 stop 面 semi_diameter = 旧值×(当前F#/目标F#)，再 local_optimize
+5. **优化**:
+   - F# 偏大: 按 assess_and_plan 给出的光阑面号和目标SD值，直接 modify_lens（无需再调 get_lens_surfaces）
    - ★ 禁止改 surface=1 的 semi_diameter 来调 F#（surface=1 不是光阑面，无效）
    - RMS 偏大: local_optimize → 若改善=0% → random_restart(strength=0.05) → local_optimize
-   - 近轴优化停滞或 F# 调完后: zemax_optimize(lens_idx=X, cycles=auto, rms_target=<目标RMS>, fnum_target=<目标F#>)
-   - ★ 调 zemax_optimize 时【必须】传 rms_target 和 fnum_target
+   - 近轴优化停滞或 F# 调完后: zemax_optimize(lens_idx=X, cycles=auto, rms_target=<目标RMS>, fnum_target=<目标F#>, fov_target=<用户FOV>)
+   - ★ 调 zemax_optimize 时【必须】传 rms_target、fnum_target 和 fov_target
+   - ★★ 同一镜头 zemax_optimize 最多 2 次。2 次后 RMS 仍不达标 → 直接 Final Answer 输出当前最优值，禁止继续循环
+   - ★ fov_target 取值：用户说的 FOV 原始值（如用户说 FOV=60° → 传 60），不传则用数据库默认值
    - ★★ rms_target 取值规则（违反此规则=严重错误）：
         • 用户给了具体数字（如"RMS<0.02"）→ 传用户原始值 0.02
         • 用户说"尽量优化"/"尽量降低"/"越小越好"等模糊描述 → 【必须】传 0.05，禁止传其他值
@@ -1370,25 +2377,49 @@ SYSTEM_PROMPT = """/no_think
           原因：近轴 RMS 比 Zemax 真值乐观 5~20 倍，用近轴值做目标必然永远未达标→无限重试→耗尽迭代。
         • 记忆口诀：rms_target 只来自【用户输入】或【固定默认值0.05】，绝不来自【工具返回值】。
 
-5. **验收**: check_spec 最多调 2 次，reasons 相同则停止。
+6. **验收**: check_spec 最多调 2 次，reasons 相同则停止。
    - pass=true 且 Zemax 可用 → 继续 zemax_optimize 获取真值，【禁止】直接 Final Answer（近轴不可信）
    - pass=true 且 Zemax 不可用（zemax_optimize 返回"Zemax桥接服务不可用"）→ 【立即】输出 Final Answer: 镜头#X | RMS=<近轴值> | 结论: 近轴达标✓（Zemax离线）。【严禁】在 Zemax 离线时调用 get_skill_detail / modify_lens / random_restart / local_optimize 等优化工具，这些操作在已达标镜头上只会让性能变差。
    - ★★ check_spec 返回 pass=true 时，【严禁】调用 get_skill_detail（性能已达标，优化策略只会破坏现有结果）
-   - F#差 → 按步骤4改光阑；EFFL差 → align_effl；RMS差 → 再优化
+   - check_spec 的 next 字段含义：
+     next=adjust_stop        → F#偏大，立即 get_lens_surfaces 找 stop 面 → modify_lens 扩 semi_diameter
+     next=align_effl         → EFFL偏差>2%，先 align_effl，再处理 F#
+     next=align_effl_then_adjust_stop → EFFL+F# 都偏，先 align_effl，再 get_lens_surfaces+modify_lens
+     next=continue_optimize  → 其他情况，直接 zemax_optimize
+   - ★★ check_spec 返回 F# 偏大时，【必须】通过扩大 stop 面 semi_diameter 来调整，
+     公式: sd_new = sd_old × (当前F# / 目标F#)
+     【严禁】因为 F# 偏差而直接放弃当前候选、跳到下一个
    - 2次都 false → 直接 zemax_optimize
 
-6. **Zemax 验收**: zemax_optimize 返回带【RMS 数值比较】结论（✅达标/❌未达标），直接按结论走。
+7. **Zemax 验收**: zemax_optimize 返回带【RMS 数值比较】结论（✅达标/❌未达标），直接按结论走。
    ★ zemax_optimize 之后【禁止】再调 check_spec。
-   ★ 达标 → 调 zemax_layout(lens_idx=X) → Final Answer。
-     zemax_layout 失败（返回"⚠ Layout 生成失败"）→ 不重试，直接 Final Answer，RMS 结果仍然有效。
+   ★ 达标 → 调 zemax_layout(lens_idx=X) → 调 get_spot_diagram(lens_idx=X) → 调 save_zmx(lens_idx=X) → Final Answer。
+     zemax_layout 默认保存到 /gz-data/layout_{{lens_idx}}.png，save_zmx 默认保存到 C:/zemax_pre_benchmark/lens_{{lens_idx}}.zmx
+     zemax_layout 失败 → 不重试，继续调 get_spot_diagram，RMS 结果仍然有效。
+     get_spot_diagram 失败 → 不重试，继续调 save_zmx。
    ★ 未达标处理流程（必须按顺序）：
      第1次未达标 → 立即再跑 zemax_optimize(同 lens_idx, cycles=10, rms_target=<用户目标>, fnum_target=<目标F#>)
      第2次未达标 → 换 rank+1 候选，从 check_spec 重新开始
      换候选后同样最多 2 次 zemax_optimize，仍未达标 → Final Answer 报最优结果
    ★★ 【严禁】第1次未达标就直接换候选，必须先用 cycles=10 重试一次。
+   ★ 若结果中出现【物理合理性警告】，必须在 Thought 中逐条写出判断
+     （例如："畸变三视场相同说明MFE配置异常，但RMS可信，继续"），
+     再决定下一步，不得无视警告直接输出 Final Answer。
 
 # 策略库(按症状调 get_skill_detail)
 {skill_index}
+
+# 物理知识速查（详情调 get_skill_detail）
+- 球差大     → 正镜换高nd(H-ZLAF55D)或split_lens拆强弯面(|r|<5mm)          [Skill P-01]
+- 场曲大     → 负镜换高nd(H-ZF7LA/H-ZF52)，正镜换低nd(H-FK61)              [Skill P-03]
+- 轴上色差   → 正镜换高Vd(H-FK61 Vd=70/H-FK71 Vd=84)，负镜换低Vd(H-ZF52)  [Skill P-04]
+- 全视场突增 → 片数不足(FOV>60°需≥6片，F#<2需≥5片)或彗差/像散              [Skill P-02/P-12]
+- 增加片数   → add_element(after_surface=最强弯面, material=H-K9L)，再 local_optimize
+- 减少片数   → remove_element(element=贡献最小的玻璃面号)，再 zemax_optimize
+- merit停滞  → random_restart(0.05)或换候选，不要无限重试                   [Skill P-13]
+- 场曲反常   → 三视场RMS相同=MFE配置bug；轴上>边缘=过度校正                  [Skill P-14/P-15]
+- 换玻璃后   → ΔEFFL 5%↑必须align_effl，Vd变化需重校色差                   [Skill P-19]
+- 近轴局限   → 近轴RMS比Zemax真值乐观5~20倍(F#<2时)，rms_target只用0.05或用户值 [Skill P-20]
 
 # 规则
 - 玻璃只用 CDGM: H-* 或 D-* (H-ZF4A, H-ZLAF55D, H-FK61, H-K9L 等),禁 N-BK7 等肖特牌号
@@ -1406,7 +2437,9 @@ Action Input: 36237
 每次只输出一个 Action。禁止同一回合同时出现 Action 和 Final Answer。
 
 Final Answer 格式:
-Final Answer: 镜头#xxxxx | RMS=x.xxxx mm | 结论: 达标✓  (或 未达标✗)
+Final Answer: 镜头#xxxxx | FOV=xx° F/x.x | RMS=x.xxxx mm | EFFL=xx.xx mm | 结论: 达标✓  (或 未达标✗)
+★★ FOV 和 F# 必须填用户要求的目标值（如用户说 FOV=69°→填69°，F/2.0→填2.0），
+   禁止填 RAG 镜头的原始参数（如 58°、2.7）。
 
 工具:
 {tools}
@@ -1499,7 +2532,101 @@ def get_retrieval_skill_detail(skill_name: str) -> str:
 import requests as _requests
 
 import os as _os_for_bridge
-ZEMAX_BRIDGE = _os_for_bridge.environ.get("ZEMAX_BRIDGE_URL", "http://127.0.0.1:5000")
+ZEMAX_BRIDGE = _os_for_bridge.environ.get("ZEMAX_BRIDGE_URL", "https://cindy-archived-suited-marie.trycloudflare.com")
+
+# ── ZMX 自动存档辅助函数 ─────────────────────────────────────────────
+import datetime as _dt, time as _time_mod
+
+# ★ 实验标签：由 run_benchmark.py 设置，用于隔离不同实验的 zmx 文件
+ZMX_EXPERIMENT_TAG: str = "default"
+
+
+def _zmx_save_dir() -> str:
+    """按实验标签+日期创建存档目录"""
+    d = f"/gz-data/zemax_pre_benchmark/{ZMX_EXPERIMENT_TAG}/{_dt.date.today()}"
+    import os as _os2; _os2.makedirs(d, exist_ok=True)
+    return d
+
+def _save_zmx_snapshot(lens_idx: int, tag: str) -> str:
+    """
+    通过 bridge /save_zmx 把当前 Zemax 内存状态保存为 .zmx 文件。
+    tag: 用途标签，例如 'pre_opt' / 'post_local' / 'post_zemax'
+    返回保存路径或错误信息。
+    """
+    import requests as _req
+    ts  = int(_time_mod.time())
+    save_dir  = _zmx_save_dir()
+    save_path = f"C:\\zemax_pre_benchmark\\{ZMX_EXPERIMENT_TAG}\\{_dt.date.today()}\\lens{lens_idx}_{tag}_{ts}.zmx"
+    # 同时在 Linux 侧记录路径（bridge 在 Windows 上，路径用 Windows 格式）
+    try:
+        resp = _req.post(
+            f"{ZEMAX_BRIDGE}/save_zmx",
+            json={"save_path": save_path},
+            headers=_NGROK_HEADERS,
+            timeout=15,
+        )
+        if resp.ok:
+            print(f"[zmx_snapshot] ✓ {tag} saved → {save_path}", flush=True)
+            return save_path
+        else:
+            print(f"[zmx_snapshot] ⚠ {tag} save failed: HTTP {resp.status_code}", flush=True)
+            return f"save failed: HTTP {resp.status_code}"
+    except Exception as _e:
+        print(f"[zmx_snapshot] ⚠ {tag} save error: {_e}", flush=True)
+        return f"save error: {_e}"
+
+
+def _auto_capture(lens_idx: int, tag: str) -> dict:
+    """
+    ★ 自动抓取当前 Zemax 状态的 layout 图 + spot diagram。
+    tag: 用于文件名的标签，如 'post_local' / 'post_zemax' / 'distilled'
+    返回 {'layout': path, 'spot': path}，失败项为 None。
+    """
+    import requests as _req_cap
+    import time as _t_cap
+    _sdir = getattr(__import__("agent_zemax"), "_SESSION_DIR", "/gz-data")
+    ts = _t_cap.strftime("%H%M%S")
+    results = {"layout": None, "spot": None}
+
+    # ── Layout ──────────────────────────────────────────────────
+    lay_path = f"{_sdir}/layout_{lens_idx}_{tag}_{ts}.png"
+    try:
+        r = _req_cap.post(f"{ZEMAX_BRIDGE}/layout",
+                          headers=_NGROK_HEADERS, timeout=30)
+        if r.ok:
+            with open(lay_path, "wb") as f: f.write(r.content)
+            results["layout"] = lay_path
+            print(f"[auto_capture] ✓ layout → {lay_path}", flush=True)
+        else:
+            print(f"[auto_capture] ⚠ layout HTTP {r.status_code}", flush=True)
+    except Exception as _e:
+        print(f"[auto_capture] ⚠ layout failed: {_e}", flush=True)
+
+    _t_cap.sleep(1.5)  # 等 layout 响应完全结束再抓 spot
+
+    # ── Spot Diagram ─────────────────────────────────────────────
+    spot_path = f"{_sdir}/spot_{lens_idx}_{tag}_{ts}.png"
+    for _attempt in range(2):   # 最多重试1次
+        try:
+            r = _req_cap.post(f"{ZEMAX_BRIDGE}/spot_diagram",
+                              headers=_NGROK_HEADERS, timeout=30)
+            if r.ok:
+                with open(spot_path, "wb") as f: f.write(r.content)
+                results["spot"] = spot_path
+                print(f"[auto_capture] ✓ spot   → {spot_path}", flush=True)
+                break
+            else:
+                print(f"[auto_capture] ⚠ spot HTTP {r.status_code}", flush=True)
+                break
+        except Exception as _e:
+            if _attempt == 0:
+                print(f"[auto_capture] ⚠ spot 重试中: {_e}", flush=True)
+                _t_cap.sleep(2)
+            else:
+                print(f"[auto_capture] ⚠ spot 最终失败: {_e}", flush=True)
+
+    return results
+
 
 # --- 自动打印所有 bridge 请求 ---
 _orig_get, _orig_post = _requests.get, _requests.post
@@ -1565,7 +2692,11 @@ def zemax_layout(input_str: str) -> str:
                 k, v = seg.split("=", 1)
                 parts[k.strip()] = v.strip()
         lens_idx  = int(parts.get("lens_idx", 0))
-        save_path = parts.get("save_path", f"/gz-data/layout_{lens_idx}.png")
+        # 优先用 _SESSION_DIR（run_experiments 设置的 case 专属目录）
+        _sdir = getattr(__import__("agent_zemax"), "_SESSION_DIR", "/gz-data")
+        import time as _ts_ly
+        _ts_ly_str = _ts_ly.strftime("%H%M%S")
+        save_path = parts.get("save_path", f"{_sdir}/layout_{lens_idx}_{_ts_ly_str}.png")
     except Exception as e:
         return f"输入格式错误: {e}"
 
@@ -1612,7 +2743,10 @@ def get_spot_diagram(input_str: str) -> str:
                 k, v = seg.split("=", 1)
                 parts[k.strip()] = v.strip()
         lens_idx  = int(parts.get("lens_idx", 0))
-        save_path = parts.get("save_path", f"/gz-data/spot_{lens_idx}.png")
+        _sdir = getattr(__import__("agent_zemax"), "_SESSION_DIR", "/gz-data")
+        import time as _ts_sp
+        _ts_sp_str = _ts_sp.strftime("%H%M%S")
+        save_path = parts.get("save_path", f"{_sdir}/spot_{lens_idx}_{_ts_sp_str}.png")
     except Exception as e:
         return f"输入格式错误: {e}"
 
@@ -1653,7 +2787,8 @@ def get_spot_diagram(input_str: str) -> str:
 
 @tool
 def zemax_optimize(input_str: str) -> str:
-    """推送面型到 Zemax 跑 DLS 优化。输入: "lens_idx=X, cycles=auto, rms_target=0.02, fnum_target=1.2"。
+    """推送面型到 Zemax 跑 DLS 优化。输入: "lens_idx=X, cycles=auto, rms_target=0.02, fnum_target=1.2, fov_target=35"。
+    fov_target: 用户要求的 FOV（度），直接传给 Zemax Field 设置，覆盖数据库里的镜头 FOV。
     rms_target/fnum_target 可选但强烈建议传入——代码会直接做数值比较并给出明确的达标/未达标结论，
     避免 LLM 自行判断出错。★ 返回 Zemax 真值(EFFL/F#/RMS/merit),新面型已回写本地。"""
     # ★ P14 熔断
@@ -1686,8 +2821,26 @@ def zemax_optimize(input_str: str) -> str:
             fnum_target = float(parts["fnum_target"]) if "fnum_target" in parts else None
         except (ValueError, TypeError):
             fnum_target = None
+        # ★ fov_target: 用户真实 FOV 要求，优先级高于数据库里的 lens["fov"]
+        try:
+            fov_target = float(parts["fov_target"]) if "fov_target" in parts else None
+        except (ValueError, TypeError):
+            fov_target = None
     except Exception as e:
         return f"输入格式错误: {e}"
+
+    # ★ self-evolve: 若已学 skill 含 best_rms_achieved，用更紧的目标覆盖宽松的用户目标。
+    # 逻辑：skill 记录的是上次实际达到的 RMS，已被 Zemax 验证可达；
+    # 用它替换用户的宽松目标（如 0.08→0.057），优化器会以此为 MFE 权重基准，
+    # 直接朝更低 RMS 收敛，无需像第一次那样"先跑宽松、再跑第二轮"。
+    if _HAS_SELF_EVOLVE and rms_target is not None:
+        try:
+            _skill_best = _SESSION_CTX.get("skill_best_rms")
+            if _skill_best and isinstance(_skill_best, float) and _skill_best < rms_target:
+                print(f"[self_evolve] skill覆盖rms_target: {rms_target:.4f} → {_skill_best:.4f}", flush=True)
+                rms_target = _skill_best
+        except Exception:
+            pass
 
     # cycles 范围保护: -1 (auto) 或 1~50
     if cycles != -1:
@@ -1701,12 +2854,28 @@ def zemax_optimize(input_str: str) -> str:
         # 避免 end_session 里 final_passed 被默认 False 覆盖，导致近轴达标会话被误判失败。
         if _HAS_SELF_EVOLVE:
             try:
-                from self_evolve import _SESSION_CTX
                 last_chk = _SESSION_CTX.get("last_check", {})
                 last_chk["zemax_offline"] = True
+                # ★ FIX: 保留 check_spec 近轴计算的 pass 结论（如果之前已经判过的话）
+                # 这样 end_session 的 final_passed 不会被错误地覆盖为 False
                 _SESSION_CTX["last_check"] = last_chk
             except Exception:
                 pass
+            # ★ FIX: Zemax 离线时也写入 record_step，让 _TRAJECTORY 记录这次调用，
+            # 否则 traj_len 永远只有 rank_by_rms 的 1 步，_should_distill 判定失败。
+            try:
+                _offline_rms = lens.get("calc_rms")
+                record_step("zemax_optimize", lens_idx,
+                            {"cycles": "offline",
+                             "zemax_pass": None,
+                             "zemax_offline": True,
+                             "rms_target": rms_target},
+                            {"rms": _offline_rms},
+                            {"rms": _offline_rms},
+                            kind="write",
+                            note="Zemax离线，使用近轴值")
+            except Exception as _rs_err:
+                print(f"[zemax_optimize] offline record_step 失败: {_rs_err}", flush=True)
         return "Zemax桥接服务不可用，请确认Windows端 zemax_bridge.py 已启动"
 
     if lens_idx < 0 or lens_idx >= len(ALL_LENSES):
@@ -1721,7 +2890,7 @@ def zemax_optimize(input_str: str) -> str:
     import time as _time
 
     # ── 重试封装：处理 bridge 短暂断线（第一次 optimize 后 Zemax/Flask 不稳定）──
-    def _post_with_retry(url, payload, timeout_s, max_retries=3, backoff=5):
+    def _post_with_retry(url, payload, timeout_s, max_retries=5, backoff=15):
         """POST with retry on ConnectionError / RemoteDisconnected.
         每次重试前先 GET /status 确认 bridge 活着，最多等 backoff×retry 秒。
         """
@@ -1755,12 +2924,26 @@ def zemax_optimize(input_str: str) -> str:
     try:
         # 推送完整面型（带 stop_surface，否则 Zemax 把第一面当光阑）
         # ★ _sanitize_surfs: 把 inf/nan 换成 JSON 安全值，避免第二次调用时崩溃
+        # ★ FOV: 优先用用户指定的 fov_target，fallback 才用数据库里的 lens["fov"]
+        # Zemax Field 设置完全由此控制，与检索到的镜头原始 FOV 无关
+        _fov_for_zemax = fov_target if fov_target is not None else lens.get("fov")
         _post_with_retry(f"{ZEMAX_BRIDGE}/load_lens",
                          payload={"surfaces": _sanitize_surfs(surfs),
-                                  "fov":  lens.get("fov"),
+                                  "fov":  _fov_for_zemax,
                                   "fnum": fnum_target or lens.get("fnum"),
                                   "stop_surface": lens.get("stop_surface")},
                          timeout_s=15)
+        # ★ ZMX 存档：优化前快照（load_lens 后，DLS 前）
+        _save_zmx_snapshot(lens_idx, "pre_zemax_opt")
+        # ★ 自动抓图：初始检索镜头的 layout + spot（首次进入 Zemax 时）
+        # 只在第一次 zemax_optimize 时抓（避免后续重跑重复抓）
+        if not _SESSION_CTX.get("_initial_captured"):
+            _SESSION_CTX["_initial_captured"] = True
+            try:
+                _auto_capture(lens_idx, "initial_search")
+            except Exception as _ic_e:
+                print(f"[zemax_optimize] ⚠ 初始抓图失败: {_ic_e}", flush=True)
+
         # ★ target_fnum 优先用调用方传入的 fnum_target（用户真实目标），
         #   fallback 才用 lens["fnum"]（历史记录，可能已过时）
         _target_fnum = fnum_target or lens.get("fnum")
@@ -1768,7 +2951,8 @@ def zemax_optimize(input_str: str) -> str:
         resp = _post_with_retry(f"{ZEMAX_BRIDGE}/zemax_optimize",
                                 payload={"cycles": cycles,
                                          "target_effl": lens.get("calc_effl") or lens.get("effl"),
-                                         "target_fnum": _target_fnum},
+                                         "target_fnum": _target_fnum,
+                                         "rms_target":  rms_target},   # ★ 传给 bridge，收紧 MFE RSCE target
                                 timeout_s=180)
         try:
             data = resp.json()
@@ -1843,6 +3027,8 @@ def zemax_optimize(input_str: str) -> str:
                 "merit_before": data.get("merit_before"),
                 "merit_after":  data.get("merit_after"),
             }
+            # ★ ZMX 存档：DLS 优化后快照（Zemax 内存已是优化后状态）
+            _save_zmx_snapshot(lens_idx, "post_zemax_opt")
 
         # merit 可能是 float / int / 字符串 / None — 统一安全格式化
         merit_raw = data.get("merit") if isinstance(data, dict) else None
@@ -1852,9 +3038,20 @@ def zemax_optimize(input_str: str) -> str:
             merit_str = "N/A" if merit_raw is None else str(merit_raw)
 
         # ★ P13 返回消息: 明确展示 Zemax 真值 RMS (每视场), 并强制要求 check_spec
-        rms_list = (data.get("rms_per_field_mm") or []) if isinstance(data, dict) else []
-        rms_str  = ", ".join(f"{float(r):.4f}" for r in rms_list) if rms_list else "N/A"
+        rms_list  = (data.get("rms_per_field_mm") or []) if isinstance(data, dict) else []
+        rms_str   = ", ".join(f"{float(r):.4f}" for r in rms_list) if rms_list else "N/A"
         rms_worst = max(rms_list) if rms_list else None
+
+        # ★ 修复：三视场全为0是追迹失败哨兵（RMS异常警告），不是真实结果
+        # 全0通常伴随 [RMS异常] 或 merit=0 停滞。把 rms_worst 置 None 防止误判达标，
+        # 也防止 best_rms_achieved 被覆盖为0（会导致下次用rms_target=0优化必死）。
+        _physics_warns = data.get("physics_warnings", []) if isinstance(data, dict) else []
+        _all_zero_rms  = (rms_list and all(float(r) == 0.0 for r in rms_list))
+        _rms_anomaly   = any("RMS异常" in w for w in _physics_warns)
+        if _all_zero_rms or _rms_anomaly:
+            print(f"[zemax_optimize] ⚠ RMS全零哨兵，视为追迹失败，rms_worst→None", flush=True)
+            rms_worst = None
+
         rms_worst_str = f"{rms_worst:.4f}" if rms_worst is not None else "N/A"
         effl_str = f"{float(data.get('effl', 0)):.3f}" if isinstance(data, dict) and data.get("effl") is not None else "N/A"
         fnum_str = f"{float(data.get('fnum', 0)):.3f}" if isinstance(data, dict) and data.get("fnum") is not None else "N/A"
@@ -1885,12 +3082,24 @@ def zemax_optimize(input_str: str) -> str:
             except Exception:
                 pass
 
-            # zemax_pass 判定: rms_worst <= 用户目标? 但我们不知道用户目标 rms,
-            # 保守用"merit 下降 + effl/fnum 都在容差内"作为"zemax 认为成功"的近似
-            _zemax_pass = bool(effl_ok and fnum_ok and rms_worst is not None)
+            # zemax_pass 判定（同时检查 EFFL、F# 和 RMS 是否达标）
+            _rms_pass = (rms_worst <= rms_target) if (rms_worst is not None and rms_target is not None) else (rms_worst is not None)
+            _zemax_pass = bool(effl_ok and fnum_ok and _rms_pass)
 
             # pre-zemax snapshot 里记录了 zemax 之前的 rms(近轴),放进 before 对比
             _pre_snapshot = _LENS_BACKUP_PRE_ZEMAX.get(lens_idx, {})
+
+            # ★ 计算 EFFL 不匹配程度（供 self_evolve 情况F使用）
+            _effl_mismatch_pct = 0.0
+            try:
+                _pre_effl = _pre_snapshot.get("calc_effl") or target_effl
+                _post_effl = float(effl_str) if effl_str != "N/A" else None
+                if _pre_effl and _post_effl and _pre_effl > 0:
+                    _effl_mismatch_pct = round(
+                        abs(_post_effl - _pre_effl) / _pre_effl * 100, 1
+                    )
+            except Exception:
+                pass
             _metrics_before_zmx = {
                 "rms":  _pre_snapshot.get("calc_rms"),
                 "effl": _pre_snapshot.get("calc_effl"),
@@ -1905,6 +3114,7 @@ def zemax_optimize(input_str: str) -> str:
                          "merit_after":  _merit_after,
                          "merit_delta_pct": _merit_delta_pct,
                          "zemax_pass": _zemax_pass,
+                         "effl_mismatch_pct": _effl_mismatch_pct,
                          "rms_per_field_mm": rms_list},
                         _metrics_before_zmx,
                         {"rms":  rms_worst,
@@ -1917,10 +3127,13 @@ def zemax_optimize(input_str: str) -> str:
         # 否则 end_session 里 final_metrics 会用上一次 check_spec 的近轴值
         if _HAS_SELF_EVOLVE and rms_worst is not None:
             try:
-                from self_evolve import _SESSION_CTX
+                # ★ FIX: 原来只检查 effl_ok and fnum_ok，漏了 _rms_pass，
+                # 导致 RMS 达标但 final_passed=False，蒸馏器误判失败会话，
+                # skill 质量差甚至不入库。此处补上 rms 判定。
+                _lc_rms_pass = (rms_worst <= rms_target) if (rms_worst is not None and rms_target is not None) else True
                 _SESSION_CTX["last_check"] = {
                     "lens_idx": lens_idx,
-                    "pass": bool(effl_ok and fnum_ok),
+                    "pass": bool(effl_ok and fnum_ok and _lc_rms_pass),
                     "rms":  rms_worst,   # ← Zemax 真值
                     "effl": float(effl_str) if effl_str != "N/A" else None,
                     "fnum": float(fnum_str) if fnum_str != "N/A" else None,
@@ -1935,7 +3148,8 @@ def zemax_optimize(input_str: str) -> str:
             f"  真值 EFFL={effl_str}mm F#={fnum_str} RMS/field=[{rms_str}] 最差={rms_worst_str}mm\n"
         )
         # ★ 代码直接做数值比较，不依赖 LLM 判断大小（LLM 曾把 0.0136 < 0.02 判成"未达标"）
-        if rms_worst is not None:
+        # ★ rms_worst=None 表示追迹失败（全零哨兵），直接判未达标
+        if rms_worst is not None and rms_worst > 1e-6:
             if rms_target is not None:
                 rms_pass = rms_worst <= rms_target
                 msg += (
@@ -1943,12 +3157,51 @@ def zemax_optimize(input_str: str) -> str:
                     f" → {'✅ 达标' if rms_pass else '❌ 未达标'}\n"
                 )
                 if rms_pass:
+                    # ★ 自动抓图：RMS 达标时立即抓 layout + spot（不依赖 LLM 主动调用）
+                    try:
+                        _caps = _auto_capture(lens_idx, "post_zemax_pass")
+                        _cap_info = ""
+                        if _caps.get("layout"): _cap_info += f"\n  [自动] Layout → {_caps['layout']}"
+                        if _caps.get("spot"):   _cap_info += f"\n  [自动] Spot   → {_caps['spot']}"
+                    except Exception as _cap_e:
+                        _cap_info = f"\n  ⚠ 自动抓图失败: {_cap_e}"
                     msg += (
-                        f"★ RMS 达标！下一步:\n"
-                        f"  1. 调 zemax_layout(lens_idx={lens_idx}) 保存布局图\n"
-                        f"  2. 输出 Final Answer: 镜头#{lens_idx} | RMS={rms_worst:.4f}mm | 结论: 达标✓\n"
-                        f"  禁止再跑 check_spec（近轴在大孔径下不可靠）"
+                        f"★ RMS 达标！【必须按顺序执行以下3步，不得跳过】:\n"
+                        f"  Step1: zemax_layout(lens_idx={lens_idx})\n"
+                        f"  Step2: get_spot_diagram(lens_idx={lens_idx})\n"
+                        f"  Step3: save_zmx(lens_idx={lens_idx})\n"
+                        f"  Step4: Final Answer: 镜头#{lens_idx} | FOV=<度> F/<F#> | RMS={rms_worst:.4f}mm | EFFL={effl_str}mm | 结论: 达标✓\n"
+                        f"  ★★ 严禁在调完 zemax_layout 之前输出 Final Answer"
+                        + _cap_info
                     )
+                    # ★ self-evolve: RMS 达标 → 标记 skill 复用成功，阻止重复蒸馏
+                    # 同时把本次实际 RMS 存入 SESSION_CTX，供蒸馏器写入 best_rms_achieved
+                    if _HAS_SELF_EVOLVE:
+                        try:
+                            # ★ RMS=0 是追迹失败哨兵值，禁止写入 skill 库
+                            if rms_worst is not None and rms_worst > 1e-6:
+                                _SESSION_CTX["best_rms_achieved"] = rms_worst
+                            else:
+                                print(f"[self_evolve] ⚠ RMS={rms_worst} 为追迹异常值，跳过 best_rms 回写", flush=True)
+                            _rec = _SESSION_CTX.get("recommended_skill")
+                            if _rec and _rec.get("name"):
+                                mark_skill_reused(_rec["name"], succeeded=True)
+                                print(f"[self_evolve] ✓ skill '{_rec['name']}' 复用成功，RMS={rms_worst:.4f}mm，跳过蒸馏", flush=True)
+                                # ★ 核心：把本次实测 RMS 回写到 skill_code 的
+                                # best_rms_achieved 字段，让库随使用次数越来越准。
+                                # 下次命中该 skill 时，Change 2 会用此值覆盖宽松目标，
+                                # 优化器从第一轮就朝更紧目标收敛。
+                                if rms_worst is not None and rms_worst > 1e-6:
+                                    _upd_ok, _upd_msg = update_skill_best_rms(
+                                        _rec["name"], rms_worst)
+                                    if _upd_ok:
+                                        print(f"[self_evolve] ✓ skill RMS 回写: {_upd_msg}", flush=True)
+                                    else:
+                                        print(f"[self_evolve] skill RMS 回写跳过: {_upd_msg}", flush=True)
+                                else:
+                                    print(f"[self_evolve] ⚠ RMS={rms_worst} 异常，不回写 skill", flush=True)
+                        except Exception as _msr_err:
+                            print(f"[self_evolve] mark/update 失败(不影响主流程): {_msr_err}", flush=True)
                 else:
                     msg += (
                         f"★ RMS 未达标，可选:\n"
@@ -1965,27 +3218,108 @@ def zemax_optimize(input_str: str) -> str:
                     f"  若达标 → 调 get_spot_diagram(lens_idx={lens_idx}) 再输出 Final Answer\n"
                     f"  若未达标 → 再跑 zemax_optimize 或换候选"
                 )
+        # ★ 物理合理性警告透传：bridge 已检查，这里原样展示给 Agent
+        physics_warnings = data.get("physics_warnings", []) if isinstance(data, dict) else []
+        if physics_warnings:
+            msg += "\n\n【物理合理性警告】\n"
+            for w in physics_warnings:
+                msg += f"  {w}\n"
+            # ★ 严重场曲 → 立刻换候选，不要再跑第二次 zemax_optimize
+            has_field_curv = any("严重场曲" in w or "Petzval" in w for w in physics_warnings)
+            has_stall      = any("优化停滞" in w for w in physics_warnings)
+            _not_passed    = not (rms_target and rms_pass)
+            if has_field_curv and _not_passed:
+                msg += ("→ ⛔ 严重场曲：当前结构 Petzval 曲率无法通过 DLS 校正，"
+                        "继续优化同一镜头无意义。\n"
+                        "   【立即执行】rank_by_rms 换下一个候选（rank+1），"
+                        "不要再对本镜头调用 zemax_optimize。")
+            elif has_stall and _not_passed:
+                msg += ("→ ⛔ 优化停滞：已到局部最优，继续优化无收益。"
+                        "立即换 rank+1 候选。")
+            else:
+                msg += "→ 收到以上警告时，必须在 Thought 中写出你对每条警告的判断，再决定下一步。"
+
         return msg
     except Exception as e:
         import traceback
         traceback.print_exc()
         return f"Zemax调用异常: {type(e).__name__}: {e}"
+@tool
+def save_zmx(input_str: str) -> str:
+    """把当前 Zemax 系统保存为 .zmx 文件。输入: "lens_idx=X" 或 "lens_idx=X, save_path=C:\\result.zmx"。
+    在 zemax_optimize 达标后、Final Answer 前调用，保留可复现的 Zemax 设计文件。"""
+    try:
+        parts = {}
+        raw = str(input_str).strip()
+        for seg in raw.split(","):
+            seg = seg.strip()
+            if "=" in seg:
+                k, v = seg.split("=", 1)
+                parts[k.strip()] = v.strip()
+        # 兼容裸数字 "138953" 和 "lens_idx=138953" 两种格式
+        if "lens_idx" not in parts:
+            for seg in raw.split(","):
+                try:
+                    parts["lens_idx"] = str(int(seg.strip().strip('"').strip("'")))
+                    break
+                except ValueError:
+                    pass
+        lens_idx = int(parts.get("lens_idx", 0))
+        # 文件名含 lens_idx + 时间戳，多 case 不覆盖
+        import time as _ts_zmx
+        _ts = _ts_zmx.strftime("%Y%m%d_%H%M%S")
+        save_path = parts.get("save_path", f"C:\\zemax_pre_benchmark\\{ZMX_EXPERIMENT_TAG}\\lens_{lens_idx}_{_ts}.zmx")
+    except Exception as e:
+        return f"输入格式错误: {e}"
+
+    import time as _tsz
+    _last_err = None
+    for _attempt in range(3):
+        try:
+            resp = _requests.post(
+                f"{ZEMAX_BRIDGE}/save_zmx",
+                headers=_NGROK_HEADERS,
+                json={"save_path": save_path, "lens_idx": lens_idx},
+                timeout=20
+            )
+            if not resp.ok:
+                _last_err = f"HTTP {resp.status_code} {resp.text[:100]}"
+                _tsz.sleep(2)
+                continue
+            data = resp.json()
+            if data.get("ok"):
+                return f"✓ Zemax 文件已保存: {data.get('path', save_path)}"
+            _last_err = data.get("error", "未知错误")
+            break
+        except Exception as e:
+            _last_err = f"{type(e).__name__}: {e}"
+            print(f"[save_zmx] attempt {_attempt+1}/3 failed: {_last_err}", flush=True)
+            _tsz.sleep(2)
+    return f"⚠ save_zmx 失败: {_last_err}\n可在 Windows 端手动另存为。"
+
+
 def build_agent():
     tools = [
         lens_search,
+        make_scratch_lens,
         rank_by_rms,
         rms_calculator,
         get_lens_surfaces,
         modify_lens,
         reset_lens,
         align_effl,
+        assess_and_plan,   # 检索后分析差距、制定修改计划
+        auto_fix_physics,  # 自动修复物理不合理的面型（牌号/厚度/穿插/光阑SD）
         random_restart,
         local_optimize,
         split_lens,
+        add_element,
+        remove_element,
         interpret_requirement,
         zemax_optimize,
         zemax_layout,
         get_spot_diagram,
+        save_zmx,
         get_skill_detail,  # 两级加载：按需拉取完整 skill
         get_retrieval_skill_detail,  # 检索策略详情：out-of-domain / EFFL偏差时按需调用
     ]
@@ -1994,8 +3328,16 @@ def build_agent():
         tools.insert(11, check_spec)
     # 动态注入 skill_index（只注入 summary，节省 token）
     skill_index_text = build_skill_index_text()
+    # ★ FIX: skill_index_text 可能来自 learned_skills.py，其中的 {var} 会被
+    # LangChain PromptTemplate 误解为模板变量。先转义所有单大括号（除已知变量外）。
+    import re as _re_prompt
+    _safe_skill_index = _re_prompt.sub(
+        r'(?<!{){(?!{)([^}]+)}(?!})',
+        lambda m: '{{' + m.group(1) + '}}',
+        skill_index_text
+    )
     prompt = PromptTemplate.from_template(
-        SYSTEM_PROMPT.replace("{skill_index}", skill_index_text)
+        SYSTEM_PROMPT.replace("{skill_index}", _safe_skill_index)
     )
     agent    = create_react_agent(llm, tools, prompt)
     from langchain_core.callbacks import BaseCallbackHandler
@@ -2038,7 +3380,7 @@ def build_agent():
     # ⚠ 新版 LangChain (≥0.1) create_react_agent 返回 RunnableSequence，
     #   不再有 .plan 属性，也不能用 RunnableLambda 替换 agent（缺少 input_keys）。
     #   正确做法：子类化 AgentExecutor，在 _take_next_step 入口裁剪 intermediate_steps。
-    _SCRATCHPAD_MAX_STEPS = 10
+    _SCRATCHPAD_MAX_STEPS = 20
 
     class _SlidingWindowExecutor(AgentExecutor):
         def _take_next_step(self, name_to_tool_map, color_mapping, inputs,
@@ -2055,7 +3397,7 @@ def build_agent():
         agent=agent,
         tools=tools,
         verbose=True,
-        max_iterations=25,          # 从50降到25，避免context超限
+        max_iterations=50,          # 允许更多步骤（SCRATCHPAD_MAX_STEPS=20 控制context）
         handle_parsing_errors=True,
         callbacks=[_ToolCallLogger()],
     )
@@ -2129,12 +3471,45 @@ def main():
             _OPTIMIZE_STALL.clear()
             _LENS_BACKUP.clear()
             _LENS_BACKUP_PRE_ZEMAX.clear()   # ★ P16
-            global _INTERPRET_CALLED
+            global _INTERPRET_CALLED, _INTERPRET_RESULT
             _INTERPRET_CALLED = False
-            start_session(q)
+            _INTERPRET_RESULT = {}
+            _rec_skill = start_session(q)
+            _q_input   = q
+            if _rec_skill and _HAS_SELF_EVOLVE:
+                _hint = (
+                    "\n\n【推荐优先执行的已学 Skill】\n"
+                    f"名称: {_rec_skill.get('name','')}\n"
+                    f"{_rec_skill.get('full','')}\n"
+                    "请先按此 Skill 的【动作】执行，若达标则直接 Final Answer。\n"
+                    "★ 若 skill_code 中含 skip_if_front_glass 或 prefer_front_glass，"
+                    "先调 rank_by_rms 取最新候选（保持最近原则），"
+                    "再跳过含失败特征的候选，优先选含成功特征的候选。\n"
+                    "★★ 若 skill_code 中含 best_rms_achieved，"
+                    "调 zemax_optimize 时必须用 rms_target=best_rms_achieved，"
+                    "而不是用户原始宽松目标——这样能直接获得更低的 RMS。"
+                )
+                _q_input = q + _hint
+                print(f"[self_evolve] 注入推荐 skill: {_rec_skill.get('name','')}", flush=True)
 
-            r = executor.invoke({"input": q})
-            print(f"\n✅ {r['output']}\n")
+            # ★★ DIRECT EXECUTION: skill 命中时直接调用工具，跳过 LLM agent
+            _direct_ok = False
+            if _rec_skill and _HAS_SELF_EVOLVE:
+                try:
+                    _dr = _run_skill_directly(q, _rec_skill)
+                    if _dr.get("ok"):
+                        _direct_ok = True
+                        print(f"\n✅ {_dr['output']}\n")
+                        mark_skill_reused(_rec_skill["name"], succeeded=True)
+                        print(f"[self_evolve] ✓ skill 直接执行成功", flush=True)
+                    else:
+                        print(f"[self_evolve] 直接执行失败: {_dr.get('reason','?')}，回退到 LLM agent", flush=True)
+                except Exception as _de:
+                    print(f"[self_evolve] 直接执行异常，回退到 LLM agent: {_de}", flush=True)
+
+            if not _direct_ok:
+                r = executor.invoke({"input": _q_input})
+                print(f"\n✅ {r['output']}\n")
 
             # 打印点列图路径（如果生成了）
             import glob as _glob
@@ -2146,15 +3521,29 @@ def main():
             # 蒸馏
             if _HAS_SELF_EVOLVE:
                 try:
-                    from self_evolve import _SESSION_CTX
                     last_chk = _SESSION_CTX.get("last_check", {})
                     # ★ FIX Bug2: zemax_offline 时保留近轴 pass 结论
                     _final_passed = bool(last_chk.get("pass", False))
+                    _final_metrics = {k: last_chk.get(k) for k in ("rms","effl","fnum")}
+                    # 保存轨迹供手动出图（几乎无耗时）；需要图时运行 plot_session_rms.py
+                    try:
+                        import json as _json, copy as _copy, self_evolve as _se
+                        Path("/gz-data/last_trajectory.json").write_text(
+                            _json.dumps({
+                                "question":      q,
+                                "trajectory":    _copy.deepcopy(_se._TRAJECTORY),
+                                "final_passed":  _final_passed,
+                                "final_metrics": _final_metrics,
+                                "rms_target":    _SESSION_CTX.get("target_spec", {}).get("rms_pass"),
+                            }, ensure_ascii=False), encoding="utf-8"
+                        )
+                    except Exception as _pe:
+                        print(f"[plot] 轨迹保存失败（不影响主流程）: {_pe}")
                     report = end_session(
                         final_passed    = _final_passed,
-                        final_metrics   = {k: last_chk.get(k) for k in ("rms","effl","fnum")},
-                        gemini_api_key  = os.environ["GEMINI_API_KEY"],
-                        gemini_base_url = os.environ["GEMINI_BASE_URL"],
+                        final_metrics   = _final_metrics,
+                        gemini_api_key  = os.environ.get("GEMINI_API_KEY", ""),
+                        gemini_base_url = os.environ.get("GEMINI_BASE_URL", ""),
                     )
                     if report.get("appended"):
                         print(f"[self_evolve] ✓ 新增 skill: {report['new_skill_name']}\n")
@@ -2162,6 +3551,260 @@ def main():
                     print(f"[self_evolve] {e}\n")
         except Exception as e:
             print(f"❌ {e}\n")
+
+
+def _run_skill_directly(question: str, skill: dict) -> dict:
+    """
+    ★★ 核心直接执行路径（bypass LLM agent）
+    流程: rank_by_rms → 过滤 skip/prefer 特征 → align_effl → zemax_optimize
+    返回 {"ok": bool, "output": str, "reason": str}
+
+    修复：
+    - 多候选重试（最多尝试 top-3），单个场曲失败不立即放弃
+    - 检测 zemax_ready=false（桥接刚启动），自动等待后重试
+    - 场曲失败候选的前组玻璃自动加入 skip_glass，后续候选跳过同类
+    每步都写入 _TRAJECTORY（record_step），确保失败时蒸馏器也能看到完整路径。
+    """
+    import re as _re, json as _json, time as _time_sk
+    code = skill.get("skill_code", "")
+
+    # 1. 从 question 解析规格
+    _fov_m   = _re.search(r'FOV[=°\s]*([0-9]+\.?[0-9]*)', question, _re.IGNORECASE)
+    _fn_m    = _re.search(r'F/([0-9]+\.?[0-9]*)', question, _re.IGNORECASE)
+    _rms_m   = _re.search(r'RMS[<≤=\s]*([0-9]+\.?[0-9]*)', question, _re.IGNORECASE)
+    _y_m     = _re.search(r'y[=\s]*([0-9]+\.?[0-9]*)mm', question, _re.IGNORECASE)
+    if not _fov_m or not _fn_m:
+        return {"ok": False, "reason": "question 中未解析出 FOV/Fnum，无法直接执行"}
+
+    fov   = float(_fov_m.group(1))
+    fnum  = float(_fn_m.group(1))
+    rms_t = float(_rms_m.group(1)) if _rms_m else 0.08
+    y_t   = float(_y_m.group(1))   if _y_m   else None
+
+    # 同步写入 target_spec，供 end_session/distill 使用
+    _SESSION_CTX.setdefault("target_spec", {}).update({
+        "fov": fov, "fnum": fnum, "rms_pass": rms_t,
+    })
+
+    # 2. 从 skill_code 解析过滤规则和最优 RMS
+    _skip_m   = _re.search(r'skip_if_front_glass\s*=\s*(\[[^\]]*\])', code)
+    _pref_m   = _re.search(r'prefer_front_glass\s*=\s*(\[[^\]]*\])', code)
+    _brms_m   = _re.search(r'best_rms_achieved\s*=\s*([0-9]+\.?[0-9]*)', code)
+    _pidx_m   = _re.search(r'prefer_lens_idx\s*=\s*(\[[^\]]*\])', code)  # ★ 新增
+    skip_glass   = []
+    prefer_glass = []
+    prefer_idx   = []   # ★ 按 lens_idx 直接指定偏好候选
+    skill_rms_target = rms_t
+    try:
+        if _skip_m:  skip_glass        = _json.loads(_skip_m.group(1).replace("'", '"'))
+        if _pref_m:  prefer_glass      = _json.loads(_pref_m.group(1).replace("'", '"'))
+        if _brms_m:  skill_rms_target  = float(_brms_m.group(1))
+        if _pidx_m:  prefer_idx        = _json.loads(_pidx_m.group(1))  # ★
+    except Exception:
+        pass
+    print(f"[skill_direct] skip={skip_glass} prefer={prefer_glass} prefer_idx={prefer_idx} rms_target={skill_rms_target}", flush=True)
+
+    # 3. rank_by_rms 获取候选
+    _q = f"FOV={fov} F/{fnum}, fov_tol=5, fnum_tol=0.5"
+    if y_t: _q += f", y_target={y_t}"
+    _rank_raw = rank_by_rms(_q)
+    try:
+        _candidates = _json.loads(_rank_raw).get("results", [])
+    except Exception:
+        return {"ok": False, "reason": f"rank_by_rms 返回解析失败: {_rank_raw[:200]}"}
+    if not _candidates:
+        return {"ok": False, "reason": "rank_by_rms 返回空候选列表"}
+
+    # 4. 候选过滤辅助
+    def _front_glass(cand_id):
+        lens = ALL_LENSES[cand_id] if cand_id < len(ALL_LENSES) else {}
+        surfs = lens.get("surfaces", [])
+        for s in surfs[:3]:
+            mat = str(s.get("material", "")).upper()
+            if mat and mat != "AIR":
+                return mat
+        return ""
+
+    def _filter_candidates(cands, skip_g, prefer_g):
+        """按 prefer/skip 排序：prefer 特征的排前面，skip 特征的排后面"""
+        preferred, neutral, skipped = [], [], []
+        for c in cands:
+            fg = _front_glass(c["id"])
+            if prefer_g and any(p.upper() in fg for p in prefer_g):
+                if not any(s.upper() in fg for s in skip_g):
+                    preferred.append(c)
+                    continue
+            if skip_g and any(s.upper() in fg for s in skip_g):
+                skipped.append(c)
+            else:
+                neutral.append(c)
+        return preferred + neutral + skipped
+
+    # 5. 多候选重试主循环（最多试 MAX_CAND_TRIES 个，场曲失败动态加 skip）
+    MAX_CAND_TRIES = 3
+    tried_ids      = set()
+    # ★ Fix1: 保存每个候选的原始面型快照，确保每次 Zemax 都从干净状态出发
+    # zemax_optimize 会把优化后面型回写到 ALL_LENSES[lid]（P12），
+    # 若不恢复，重试同一 lens_idx 时拿到的是上次优化后的脏面型，结果不可重现。
+    _orig_surfs_cache: dict = {}   # lid -> deepcopy of original surfaces
+    def _snapshot_orig(lid):
+        if lid not in _orig_surfs_cache and lid < len(ALL_LENSES):
+            import copy as _copy
+            _orig_surfs_cache[lid] = _copy.deepcopy(ALL_LENSES[lid].get("surfaces"))
+    def _restore_orig(lid):
+        if lid in _orig_surfs_cache and lid < len(ALL_LENSES):
+            import copy as _copy
+            ALL_LENSES[lid]["surfaces"] = _copy.deepcopy(_orig_surfs_cache[lid])
+            print(f"[skill_direct] ✓ lens#{lid} 面型已恢复原始状态", flush=True)
+
+    # ★ Fix2: 动态 skip 改为按 lens_idx，不按玻璃名（避免误杀同玻璃的其他优质候选）
+    dynamic_skip_idx: set = set()   # 只排除场曲炸掉的具体镜头
+
+    if y_t:
+        import math as _math
+        effl_t = round(y_t / _math.tan(_math.radians(fov / 2)), 4)
+    else:
+        effl_t = None
+
+    # ★ prefer_idx 有值时，把指定 lens 移到候选队列最前面
+    if prefer_idx:
+        _idx_set     = set(prefer_idx)
+        _front       = [c for c in _candidates if c["id"] in _idx_set]
+        _rest        = [c for c in _candidates if c["id"] not in _idx_set]
+        _front_sorted = sorted(_front,
+                               key=lambda c: prefer_idx.index(c["id"])
+                               if c["id"] in prefer_idx else 999)
+        _candidates   = _front_sorted + _rest
+        if _front_sorted:
+            print(f"[skill_direct] prefer_idx → 优先候选: "
+                  f"{[c['id'] for c in _front_sorted]}", flush=True)
+
+    for _try_n in range(MAX_CAND_TRIES):
+        # 重新排序候选（skip_glass 可能已被上轮动态追加）
+        ordered = _filter_candidates(_candidates, skip_glass, prefer_glass)
+        # ★ Fix2: 同时排除 dynamic_skip_idx（场曲炸掉的具体镜头），
+        #   不再因玻璃名误杀同玻璃的其他候选
+        chosen  = next((c for c in ordered
+                        if c["id"] not in tried_ids
+                        and c["id"] not in dynamic_skip_idx), None)
+        if not chosen:
+            break
+
+        lid      = chosen["id"]
+        rms_init = chosen.get("rms")
+        tried_ids.add(lid)
+        fg_lid   = _front_glass(lid)
+        # ★ Fix1: 在调 align_effl/zemax_optimize 之前先快照原始面型
+        _snapshot_orig(lid)
+        print(f"[skill_direct] 尝试#{_try_n+1} lens#{lid} "
+              f"(RMS={rms_init} front={fg_lid})", flush=True)
+
+        # record_step: rank_by_rms 决策
+        try:
+            record_step("rank_by_rms", lid,
+                        {"fov_target": fov, "fnum_target": fnum,
+                         "is_ood": False, "picked_id": lid,
+                         "picked_rms_paraxial": rms_init,
+                         "n_candidates": len(_candidates),
+                         "skill_direct": True, "try_n": _try_n,
+                         "skip_glass": list(skip_glass),
+                         "prefer_glass": prefer_glass},
+                        kind="decide")
+        except Exception:
+            pass
+
+        # align_effl（内部已调 record_step）
+        # ★ Fix1: 每次尝试前恢复原始面型，确保 align_effl + zemax_optimize 从干净状态出发
+        _restore_orig(lid)
+        if effl_t:
+            _ae = align_effl(f"lens_idx={lid}, target_effl={effl_t}")
+            print(f"[skill_direct] align_effl: {_ae[:100]}", flush=True)
+
+        # zemax_optimize：skill_rms_target 只作为优化器收紧目标传给 Zemax，
+        # ★ Bug1修复：pass/fail 判据用用户原始目标 rms_t，不用 skill_rms_target，
+        #   否则 skill 记录的极低历史值会让实际达标的候选被误判失败。
+        _rms_before_zmx = ALL_LENSES[lid].get("calc_rms") if lid < len(ALL_LENSES) else rms_init
+        _zo_input = (f"lens_idx={lid}, cycles=auto, rms_target={skill_rms_target}, "
+                     f"fnum_target={fnum}, fov_target={fov}")
+        _zo_raw   = zemax_optimize(_zo_input)
+        last        = _SESSION_CTX.get("last_check", {})
+        rms_achieved = last.get("rms")
+        # ★ 用用户原始目标判断是否达标（zemax_optimize 内部也以 rms_t 作了判断，
+        #   但 skill_rms_target 更严，可能把 last["pass"] 置 False；这里重新用 rms_t）
+        # ★ RMS=0.0 是追迹失败的哨兵值（三视场完全相同=0），不算达标
+        _rms_valid = (rms_achieved is not None and rms_achieved > 1e-6)
+        rms_pass = (_rms_valid and rms_achieved <= rms_t)
+        if rms_achieved == 0.0:
+            print(f"[skill_direct] ⚠ RMS=0.0 为追迹失败哨兵值，判定为未达标", flush=True)
+        print(f"[skill_direct] zemax 完成: RMS={rms_achieved} pass={rms_pass} "
+              f"(user_target={rms_t})", flush=True)
+
+        # ── Zemax 未就绪（zemax_ready=false）→ 等待后重试同一候选 ──
+        if rms_achieved is None and "Zemax桥接服务不可用" in str(_zo_raw):
+            print("[skill_direct] Zemax 未就绪，等待 8s 后重试...", flush=True)
+            _time_sk.sleep(8)
+            _zo_raw2   = zemax_optimize(_zo_input)
+            last        = _SESSION_CTX.get("last_check", {})
+            rms_achieved = last.get("rms")
+            _rms_valid2  = (rms_achieved is not None and rms_achieved > 1e-6)
+            rms_pass     = (_rms_valid2 and rms_achieved <= rms_t)
+            print(f"[skill_direct] 重试后: RMS={rms_achieved} pass={rms_pass}", flush=True)
+
+        if rms_pass:
+            # ── 成功！修正 last_check["pass"]，确保 end_session 看到 final_passed=True ──
+            try:
+                _lc = _SESSION_CTX.get("last_check", {})
+                _lc["pass"] = True
+                _SESSION_CTX["last_check"] = _lc
+            except Exception:
+                pass
+            try:
+                zemax_layout(f"lens_idx={lid}, save_path=/gz-data/layout_{lid}.png")
+            except Exception as _le:
+                print(f"[skill_direct] layout 失败（非致命）: {_le}", flush=True)
+            try:
+                get_spot_diagram(f"lens_idx={lid}, save_path=/gz-data/spot_{lid}.png")
+            except Exception as _se:
+                print(f"[skill_direct] spot 失败（非致命）: {_se}", flush=True)
+            try:
+                save_zmx(f"lens_idx={lid}, save_path=C:/zemax_pre_benchmark/lens_{lid}_skill.zmx")
+            except Exception as _sve:
+                print(f"[skill_direct] save 失败（非致命）: {_sve}", flush=True)
+
+            effl_v = last.get("effl", "?")
+            fnum_v = last.get("fnum", "?")
+            output = (f"镜头#{lid} | FOV={fov}° F/{fnum} | RMS={rms_achieved}mm | EFFL={effl_v}mm | 结论: 达标✓\n"
+                      f"  EFFL={effl_v}mm  F#={fnum_v}\n"
+                      f"  [skill_direct] 复用 skill '{skill.get('name','')}' 直接执行"
+                      f"（尝试#{_try_n+1}，跳过 assess_and_plan/rms_calculator）")
+            return {"ok": True, "output": output}
+
+        # ── 失败：记录轨迹 + 动态追加 skip_glass ──
+        try:
+            record_step("skill_direct_fail", lid,
+                        {"reason": f"RMS={rms_achieved} > user_target={rms_t}",
+                         "skill_name": skill.get("name", ""),
+                         "try_n": _try_n, "front_glass": fg_lid},
+                        {"rms": _rms_before_zmx},
+                        {"rms": rms_achieved},
+                        kind="decide")
+        except Exception:
+            pass
+
+        # ★ Fix2: 场曲失败只排除这个具体 lens_idx，不按玻璃名误杀同玻璃候选
+        _is_field_curvature = (rms_achieved is None or
+                               (rms_achieved is not None and rms_achieved > rms_t * 2))
+        if _is_field_curvature:
+            dynamic_skip_idx.add(lid)
+            print(f"[skill_direct] 场曲失败，动态 skip lens#{lid} (front={fg_lid}，"
+                  f"同玻璃其他候选不受影响)", flush=True)
+            # 仍把玻璃名写入 SESSION_CTX 供 LLM fallback hint 参考，但不放入 skip_glass
+            _SESSION_CTX["_direct_skip_glass"] = list(skip_glass)
+            _SESSION_CTX.setdefault("_direct_skip_idx", []).append(lid)
+
+    # 所有候选都失败
+    return {"ok": False, "reason": f"尝试了 {len(tried_ids)} 个候选均未达标，回退 LLM agent"}
+
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2176,33 +3819,160 @@ def run_agent(question: str) -> str:
     _OPTIMIZE_STALL.clear()
     _LENS_BACKUP.clear()
     _LENS_BACKUP_PRE_ZEMAX.clear()   # ★ P16
-    global _INTERPRET_CALLED
+    global _INTERPRET_CALLED, _INTERPRET_RESULT
     _INTERPRET_CALLED = False
+    _INTERPRET_RESULT = {}
     if _executor is None:
-        VS, ALL_LENSES = load_rag()
+        if VS is None or not ALL_LENSES:
+            VS, ALL_LENSES = load_rag()
         _executor = build_agent()
 
-    # ★ self-evolve: session 开始
-    start_session(question)
+    # ★ self-evolve: session 开始（Voyager：先查现有 skill，有则优先复用）
+    _recommended_skill = start_session(question)
+    _input_for_agent   = question
+    if _recommended_skill and _HAS_SELF_EVOLVE:
+        # ★ FIX: 必须存入 _SESSION_CTX，否则 zemax_optimize 里
+        # _SESSION_CTX.get("recommended_skill") 永远为 None，
+        # mark_skill_reused / update_skill_best_rms 永远不执行，
+        # 蒸馏守卫永远不触发，skill 库无限增长但不收敛。
+        _SESSION_CTX["recommended_skill"] = _recommended_skill
+        # ★ 直接执行时动态发现的场曲失败玻璃，透传给 LLM hint
+        # （在 _run_skill_directly 之后才能拿到，先占位，后面动态补充）
+        _SESSION_CTX["_direct_skip_glass"] = []
+        _skill_hint = (
+            "\n\n【推荐优先执行的已学 Skill（Voyager 风格）】\n"
+            f"名称: {_recommended_skill.get('name','')}\n"
+            f"匹配度: {_recommended_skill.get('_retrieval_score','?')}\n"
+            f"{_recommended_skill.get('full','')}\n"
+            "★ 执行约束（必须遵守）:\n"
+            "  1. 若 skill_code 含 best_rms_achieved，zemax_optimize 必须用该值作 rms_target，"
+            "不得用用户原始宽松目标。\n"
+            "  2. assess_and_plan / rms_calculator 步骤可跳过，直接 align_effl → zemax_optimize。\n"
+            "  3. 若 skill_code 含 skip_if_front_glass 或 prefer_front_glass，"
+            "先调 rank_by_rms 取最新候选，再跳过失败特征候选。\n"
+            "  4. zemax_optimize 达标后立即 zemax_layout → get_spot_diagram → save_zmx → Final Answer，"
+            "禁止再次 zemax_optimize。\n"
+        )
+        _input_for_agent = question + _skill_hint
+        print(f"[self_evolve] 注入推荐 skill: {_recommended_skill.get('name','')}", flush=True)
 
-    result = _executor.invoke({"input": question})
-    output = result.get("output", "")
+        # ★ 从 skill_code 解析 best_rms_achieved / zemax_rounds，
+        # 存入 SESSION_CTX 供 zemax_optimize 强制覆盖宽松的用户目标，
+        # 这是 self-evolve 真正提升 RMS 的关键路径。
+        import re as _re_skill
+        _skill_code = _recommended_skill.get("skill_code", "")
+        _brms_m  = _re_skill.search(r'best_rms_achieved\s*=\s*([0-9]+\.?[0-9]*)', _skill_code)
+        _rounds_m = _re_skill.search(r'zemax_rounds\s*=\s*([0-9]+)', _skill_code)
+        if _brms_m:
+            try:
+                _SESSION_CTX["skill_best_rms"] = float(_brms_m.group(1))
+                print(f"[self_evolve] skill_best_rms={_SESSION_CTX['skill_best_rms']} (将覆盖宽松目标)", flush=True)
+            except Exception:
+                pass
+        if _rounds_m:
+            try:
+                _SESSION_CTX["skill_zemax_rounds"] = int(_rounds_m.group(1))
+                print(f"[self_evolve] skill_zemax_rounds={_SESSION_CTX['skill_zemax_rounds']}", flush=True)
+            except Exception:
+                pass
+
+    # ★★ DIRECT EXECUTION: skill 命中时直接调用工具函数，不经过 LLM agent，
+    # 跳过 assess_and_plan / rms_calculator（这是复用 skill 的主要加速点）。
+    # 失败时自动回退到 LLM agent + skill hint。
+    _direct_ok = False
+    if _recommended_skill and _HAS_SELF_EVOLVE:
+        try:
+            _direct_result = _run_skill_directly(question, _recommended_skill)
+            if _direct_result.get("ok"):
+                _direct_ok = True
+                output = _direct_result["output"]
+                mark_skill_reused(_recommended_skill["name"], succeeded=True)
+                print(f"[self_evolve] ✓ skill 直接执行成功，跳过 LLM agent", flush=True)
+            else:
+                print(f"[self_evolve] 直接执行失败: {_direct_result.get('reason','?')}，回退到 LLM agent", flush=True)
+                # ★ 把直接执行时动态发现的场曲失败玻璃追加到 LLM 的 hint 里，
+                # 让 LLM fallback 也能跳过已知失败候选，减少无效步骤
+                _dyn_skip = _SESSION_CTX.get("_direct_skip_glass", [])
+                if _dyn_skip:
+                    _extra = (f"\n  ★ 直接执行已确认以下前组玻璃导致场曲失败，"
+                              f"rank_by_rms 后必须跳过含这些玻璃的候选: {_dyn_skip}\n")
+                    _input_for_agent = _input_for_agent + _extra
+                    print(f"[self_evolve] 动态 skip 注入 LLM hint: {_dyn_skip}", flush=True)
+        except Exception as _de:
+            import traceback as _tb
+            print(f"[self_evolve] 直接执行异常，回退到 LLM agent: {_de}", flush=True)
+            print(_tb.format_exc(), flush=True)
+
+    if not _direct_ok:
+        result = _executor.invoke({"input": _input_for_agent})
+        output = result.get("output", "")
 
     # ★ self-evolve: session 结束，蒸馏轨迹 → 追加到 learned_skills.py
     if _HAS_SELF_EVOLVE:
         try:
-            from self_evolve import _SESSION_CTX
             last_chk = _SESSION_CTX.get("last_check", {})
             final_passed  = bool(last_chk.get("pass", False))  # ★ FIX Bug2: zemax_offline 时此值已由 zemax_optimize 保留为 True
             final_metrics = {k: last_chk.get(k) for k in ("rms", "effl", "fnum")}
+            # ★ self-evolve: 把本次实际达到的最佳 RMS 传给蒸馏器，
+            # Gemini 会把它写入 skill_code 的 best_rms_achieved 字段，
+            # 下次 zemax_optimize 将以此为目标直接冲更低 RMS（Change 2 的依赖）。
+            _best_rms = _SESSION_CTX.get("best_rms_achieved")
+            if _best_rms is not None:
+                final_metrics["best_rms_achieved"] = _best_rms
+            # 保存轨迹供手动出图（几乎无耗时）；需要图时运行 plot_session_rms.py
+            try:
+                import json as _json, copy as _copy, self_evolve as _se
+                _traj_data = _json.dumps({
+                    "question":      question,
+                    "trajectory":    _copy.deepcopy(_se._TRAJECTORY),
+                    "final_passed":  final_passed,
+                    "final_metrics": final_metrics,
+                    "rms_target":    _SESSION_CTX.get("target_spec", {}).get("rms_pass"),
+                }, ensure_ascii=False)
+                Path("/gz-data/last_trajectory.json").write_text(_traj_data, encoding="utf-8")
+                # ★ 同时保存到 session 目录，供 run_experiments.py 读取
+                _sdir = getattr(__import__("agent_zemax"), "_SESSION_DIR", None)
+                if _sdir:
+                    Path(f"{_sdir}/trajectory.json").write_text(_traj_data, encoding="utf-8")
+            except Exception as _pe:
+                print(f"[plot] 轨迹保存失败（不影响主流程）: {_pe}")
             report = end_session(
                 final_passed    = final_passed,
                 final_metrics   = final_metrics,
-                gemini_api_key  = os.environ["GEMINI_API_KEY"],
-                gemini_base_url = os.environ["GEMINI_BASE_URL"],
+                gemini_api_key  = os.environ.get("GEMINI_API_KEY", ""),
+                gemini_base_url = os.environ.get("GEMINI_BASE_URL", ""),
             )
             if report.get("appended"):
-                print(f"[self_evolve] ✓ 新增 skill: {report['new_skill_name']}")
+                new_name = report['new_skill_name']
+                print(f"[self_evolve] ✓ 新增 skill: {new_name}")
+                # ★ 入库时自动抓图（layout + spot）记录当前最优镜头状态
+                _last_lens = _SESSION_CTX.get("last_check", {}).get("lens_idx") or \
+                             _SESSION_CTX.get("target_spec", {}).get("lens_idx")
+                if _last_lens:
+                    try:
+                        _sdir = getattr(__import__("agent_zemax"), "_SESSION_DIR", "/gz-data")
+                        import os as _os_cap
+                        _os_cap.makedirs(f"{_sdir}/distilled", exist_ok=True)
+                        import re as _re_tag
+                        _safe_tag = _re_tag.sub(r'[^\x00-\x7F]', '', new_name[:20]).replace(' ','_').strip('_') or "distilled"
+                        _distill_caps = _auto_capture(int(_last_lens), f"distilled_{_safe_tag}")
+                        print(f"[self_evolve] 入库抓图: layout={_distill_caps.get('layout')} spot={_distill_caps.get('spot')}")
+                    except Exception as _de:
+                        print(f"[self_evolve] 入库抓图失败（不影响结果）: {_de}")
+                # ★ 打印 self-evolve rollout（轨迹摘要）
+                try:
+                    import self_evolve as _se_mod
+                    traj = _se_mod._TRAJECTORY
+                    print(f"\n{'─'*60}")
+                    print(f"[self_evolve rollout] 共 {len(traj)} 步:")
+                    for _i, _s in enumerate(traj):
+                        _tool = _s.get("tool", "?")
+                        _drms = _s.get("delta_rms")
+                        _drms_str = f" ΔRMS={_drms:+.4f}" if _drms is not None else ""
+                        print(f"  {_i+1:>2}. {_tool:<25}{_drms_str}")
+                    print(f"{'─'*60}\n")
+                except Exception:
+                    pass
             elif report.get("trajectory_len", 0) >= 3:
                 print(f"[self_evolve] 未入库: {report.get('reason')}")
         except Exception as e:
@@ -2215,3 +3985,141 @@ if __name__ == "__main__":
     main()
 
 
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# No-RAG 从头设计：双高斯变体初始结构
+# ─────────────────────────────────────────────────────────────────────────────
+@tool
+def make_scratch_lens(input: str) -> str:
+    """从头构造双高斯变体初始镜头结构（无需RAG检索）。
+    输入格式: "fov=30, fnum=4.5" 或 "fov=30, fnum=4.5, n_elements=6"
+    输出: 构造完成的 lens_idx，可直接用于 align_effl / zemax_optimize。
+    适用场景: RAG 检索无结果时，从头设计初始结构。
+    """
+    import re
+    fov   = float(re.search(r'fov[=:\s]*([\d.]+)', input, re.I).group(1))
+    fnum  = float(re.search(r'fnum[=:\s]*([\d.]+)', input, re.I).group(1))
+    m_n   = re.search(r'n_elements[=:\s]*(\d+)', input, re.I)
+    n_el  = int(m_n.group(1)) if m_n else 6
+    info, lens_idx = _make_scratch_lens(fov, fnum, n_el)
+    return f"{info}\nlens_idx={lens_idx}  请使用 align_effl 对齐 EFFL，再用 zemax_optimize 优化。"
+
+def _make_scratch_lens(fov: float, fnum: float, n_elements: int = 6):
+    """
+    构造一个双高斯变体初始结构并注入 Zemax，返回 (info_str, lens_idx)。
+    材料交替使用 H-K9L（冕）/ H-ZF4A（火石）。
+    lens_idx 从 900000 起，避免与 RAG 库冲突。
+    """
+    import math, requests, time
+
+    effl_init = 50.0          # mm，占位焦距，后续由 align_effl 修正
+    hfov      = math.radians(fov / 2.0)
+    y_init    = effl_init * math.tan(hfov)
+    enp_r     = effl_init / (2.0 * fnum)   # 入瞳半径
+
+    # 双高斯变体面型参数（归一化到 effl=50）
+    _DG_TEMPLATES = {
+        4: [
+            dict(r= 32.0, t=5.0, mat="H-K9L"),
+            dict(r=-32.0, t=3.0, mat="H-ZF4A"),
+            dict(r= 0,    t=2.0, mat=None),      # stop
+            dict(r= 32.0, t=3.0, mat="H-ZF4A"),
+            dict(r=-32.0, t=5.0, mat="H-K9L"),
+        ],
+        6: [
+            dict(r= 58.0, t=6.0, mat="H-LAK52"),
+            dict(r=-58.0, t=2.5, mat="H-ZF4A"),
+            dict(r= 36.0, t=5.0, mat="H-K9L"),
+            dict(r= 0,    t=2.0, mat=None),       # stop
+            dict(r=-36.0, t=5.0, mat="H-K9L"),
+            dict(r= 58.0, t=2.5, mat="H-ZF4A"),
+            dict(r=-58.0, t=6.0, mat="H-LAK52"),
+        ],
+        8: [
+            dict(r= 70.0, t=6.5, mat="H-LAK52"),
+            dict(r=-70.0, t=2.5, mat="H-ZF4A"),
+            dict(r= 45.0, t=6.0, mat="H-K9L"),
+            dict(r=-45.0, t=2.0, mat="H-ZKN1"),
+            dict(r= 0,    t=2.0, mat=None),
+            dict(r= 45.0, t=2.0, mat="H-ZKN1"),
+            dict(r=-45.0, t=6.0, mat="H-K9L"),
+            dict(r= 70.0, t=2.5, mat="H-ZF4A"),
+            dict(r=-70.0, t=6.5, mat="H-LAK52"),
+        ],
+    }
+    # 选最近的模板片数
+    avail = sorted(_DG_TEMPLATES.keys())
+    n_key = min(avail, key=lambda x: abs(x - n_elements))
+    surfaces = _DG_TEMPLATES[n_key]
+
+    # 按 effl 缩放
+    scale = effl_init / 50.0
+    scaled = []
+    for s in surfaces:
+        scaled.append({
+            "r": s["r"] * scale if s["r"] != 0 else 0,
+            "t": s["t"] * scale,
+            "mat": s["mat"],
+        })
+
+    # 分配 lens_idx（时间戳尾缀避免冲突）
+    lens_idx = len(ALL_LENSES)   # append 到列表末尾，idx = 当前长度
+
+    # 调用 bridge 写入 Zemax
+    bridge = ZEMAX_BRIDGE
+    payload = {
+        "lens_idx": lens_idx,
+        "surfaces": scaled,
+        "effl": effl_init,
+        "fov":  fov,
+        "fnum": fnum,
+        "y":    y_init,
+        "enp_radius": enp_r,
+    }
+    # 把 _DG_TEMPLATES 格式转为 bridge /load_lens 需要的格式
+    # surface_num 从 1 开始（0=OBJ，最后一面=IMA 自动）
+    load_surfs = []
+    surf_num = 1
+    for s in scaled:
+        entry = {
+            "surface_num": surf_num,
+            "radius":      s["r"] if s["r"] != 0 else 1e10,
+            "thickness":   s["t"],
+            "material":    s["mat"] if s["mat"] else "",
+            "semi_diameter": enp_r * 1.2,
+        }
+        load_surfs.append(entry)
+        surf_num += 1
+
+    try:
+        import requests as _req
+        resp = _req.post(f"{bridge}/load_lens",
+                         json={"surfaces": load_surfs, "fov": fov, "fnum": fnum},
+                         headers={"ngrok-skip-browser-warning": "true"},
+                         timeout=30)
+        resp.raise_for_status()
+        actual_effl = effl_init
+        actual_rms  = 999.0
+    except Exception as e:
+        actual_effl = effl_init
+        actual_rms  = 999.0
+
+    # 把这个初始结构写入内存缓存，让后续工具能通过 lens_idx 访问
+    _scratch_entry = {
+        "id": lens_idx,
+        "fov": fov,
+        "fnum": fnum,
+        "effl": actual_effl,
+        "rms":  actual_rms,
+        "surfaces": load_surfs,   # bridge 格式 (radius/thickness/material/surface_num)
+        "n_elements": n_key,
+        "source": "scratch",
+    }
+    ALL_LENSES.append(_scratch_entry)
+    _LENS_BACKUP[lens_idx] = _scratch_entry
+
+    info = (f"[No-RAG] 从头构造双高斯变体 #{lens_idx}\n"
+            f"  片数={n_key}  EFFL={actual_effl:.2f}mm  "
+            f"FOV={fov}°  F/{fnum}  近轴RMS={actual_rms:.4f}mm")
+    return info, lens_idx
